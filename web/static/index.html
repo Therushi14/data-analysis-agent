@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Data-Analysis Agent</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%8A%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◧</span>
+      <div>
+        <h1>Data-Analysis Agent</h1>
+        <p>Ask in plain English — it writes Python, runs it in a sandbox, and shows its work.</p>
+      </div>
+    </div>
+    <span id="key-pill" class="pill pill-muted">checking keys…</span>
+  </header>
+
+  <main class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <section class="card">
+        <h2 class="card-title">Dataset</h2>
+        <div id="drop" class="dropzone">
+          <input id="file-input" type="file" accept=".csv" hidden />
+          <p class="dropzone-main">Drop a CSV here or <button id="browse-btn" class="link">browse</button></p>
+          <p class="dropzone-sub">or</p>
+          <button id="sample-btn" class="btn btn-ghost btn-sm">Use bundled sample</button>
+        </div>
+        <div id="dataset-info" class="dataset-info hidden">
+          <div class="dataset-head">
+            <span id="ds-name" class="ds-name"></span>
+            <span id="ds-dims" class="pill pill-soft"></span>
+          </div>
+          <details class="schema">
+            <summary>Columns &amp; preview</summary>
+            <div id="ds-columns" class="ds-columns"></div>
+            <div class="table-scroll"><table id="ds-preview"></table></div>
+          </details>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">Settings</h2>
+        <label class="field">
+          <span class="field-label">Model</span>
+          <select id="model-select"></select>
+        </label>
+        <label class="field">
+          <span class="field-label">Max steps <em id="steps-value">8</em></span>
+          <input id="steps-range" type="range" min="1" max="12" value="8" />
+        </label>
+        <p class="hint">Free tier ≈ 20 requests/day per model. Switch models for fresh quota.</p>
+      </section>
+    </aside>
+
+    <!-- Workspace -->
+    <section class="workspace">
+      <div class="ask card">
+        <textarea id="question" rows="3"
+          placeholder="e.g. Which region grew fastest from January to April by revenue? Plot it."></textarea>
+        <div class="ask-row">
+          <span id="ask-note" class="hint"></span>
+          <button id="ask-btn" class="btn btn-primary" disabled>Ask</button>
+        </div>
+      </div>
+
+      <div id="empty-state" class="empty-state">
+        <div class="empty-icon">◧</div>
+        <p>Load a dataset and ask a question to see the agent reason step by step.</p>
+      </div>
+
+      <div id="answer" class="answer card hidden"></div>
+
+      <div id="trace" class="trace"></div>
+    </section>
+  </main>
+
+  <script src="/static/main.js"></script>
+</body>
+</html>

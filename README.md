@@ -9,10 +9,11 @@ The thing that makes this an *agent* (not a single LLM call) is the loop:
 max-iteration guard. The LLM is **Google Gemini** (via `google-genai`), behind a
 provider-agnostic interface so it can be swapped.
 
-> Status: **Levels 1–3 + Streamlit UI** implemented — the reason → act → observe
-> → self-correct loop runs end to end, with up-front **planning** for multi-part
-> questions, a repair budget, and a browser UI. See [plan.md](plan.md) for the
-> full roadmap (memory, evals).
+> Status: **Levels 1–3 + a custom web UI** implemented — the reason → act →
+> observe → self-correct loop runs end to end, with up-front **planning** for
+> multi-part questions, a repair budget, and a hand-built FastAPI web app that
+> streams the reasoning trace live. See [plan.md](plan.md) for the full roadmap
+> (memory, evals).
 
 ---
 
@@ -75,26 +76,40 @@ the daily reset, switch `GEMINI_MODEL` to a different flash model (each model ha
 its own daily quota), use a key from a different project, or enable billing. The
 CLI caps each request at 60s and shows a clear message instead of hanging.
 
-## Web UI (Streamlit)
+## Web app (primary UI)
 
-Prefer clicking to typing? Run the UI:
+A hand-built, clean-and-minimal web UI (FastAPI backend + a static frontend in
+[web/static/](web/static)) that reuses the **same** Orchestrator/Sandbox/Gemini
+client as the CLI, so behavior can't diverge.
+
+```bash
+python run_web.py                 # http://127.0.0.1:8000
+# or, with auto-reload for development:
+uvicorn web.server:app --reload
+```
+
+It lets you:
+
+- drag-and-drop a CSV (or load the bundled sample);
+- pick the **model** and **max steps** (handy for dodging the per-model daily quota);
+- ask a question and watch the **reasoning trace stream live** — the plan, each
+  step's syntax-highlighted code, and its result — as newline-delimited JSON;
+- see the final answer with any **chart rendered inline** (embedded as a data URI,
+  so no artifact paths are exposed), plus a status/plan/recovery summary.
+
+Keys are read from `.env` (`GEMINI_API_KEY` / `GEMINI_API_KEY_BACKUP`); the same
+automatic failover applies.
+
+### Alternate UI (Streamlit)
+
+A simpler Streamlit version is also available:
 
 ```bash
 streamlit run app.py
 ```
 
-It opens in your browser and lets you:
-
-- upload a CSV (or use the bundled sample);
-- pick the **model** and **max steps** in the sidebar (handy for dodging the
-  per-model daily quota);
-- ask a question and watch the **reasoning trace stream live** (each step's code
-  and result);
-- see the final answer with any **chart rendered inline** and tables shown;
-- keep previous questions (and their charts) visible for the session.
-
-Keys are read from `.env` locally, or from Streamlit **secrets** when deployed
-(`GEMINI_API_KEY` / `GEMINI_API_KEY_BACKUP`). The same failover applies.
+It offers the same core flow and, when deployed, reads keys from Streamlit
+**secrets**.
 
 ## Self-correction (the centerpiece)
 
@@ -159,7 +174,7 @@ pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adap
 | 1 | Core loop (reason → act → observe → answer) | ✅ implemented |
 | 2 | Self-correction: repair budget, repeat-guard, correction tagging | ✅ implemented |
 | 3 | Planning / multi-step decomposition + charts | ✅ implemented |
-| 4 | Streamlit UI (live trace + inline charts) · session memory · deploy | UI ✅; memory/deploy planned |
+| 4 | Web UI (custom FastAPI app + Streamlit) · session memory · deploy | UI ✅ (custom + Streamlit); memory/deploy planned |
 | 5 | Eval harness + before/after accuracy | planned |
 
 See [plan.md](plan.md) for the full plan, interface contracts, and milestone

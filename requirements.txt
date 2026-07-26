@@ -6,8 +6,16 @@ matplotlib>=3.7
 pyarrow>=14.0             # parquet serialization for the sandbox data handoff
 pydantic-settings>=2.0    # typed config from environment / .env
 python-dotenv>=1.0        # .env loading
-streamlit>=1.30           # UI (used from Level 4 onward)
+
+# --- Web UI (primary): custom FastAPI app with a streamed reasoning trace ---
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9  # CSV file uploads
+
+# --- Alternate UI ---
+streamlit>=1.30           # secondary UI (streamlit run app.py)
 
 # --- Dev / test ---
 pytest>=8.0
+httpx>=0.27              # FastAPI TestClient (web tests)
 ruff>=0.5

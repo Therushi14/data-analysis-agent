@@ -28,6 +28,32 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+# A clean, modern default look for any chart the agent draws. The model's own
+# code runs afterwards and can still override any of these.
+plt.rcParams.update({
+    "figure.facecolor": "white",
+    "axes.facecolor": "white",
+    "axes.edgecolor": "#d0d3d9",
+    "axes.linewidth": 0.9,
+    "axes.grid": True,
+    "grid.color": "#e6e8eb",
+    "grid.linewidth": 0.8,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "axes.labelcolor": "#374151",
+    "text.color": "#111827",
+    "xtick.color": "#6b7280",
+    "ytick.color": "#6b7280",
+    "font.size": 10,
+    "figure.dpi": 110,
+    "savefig.facecolor": "white",
+    "axes.prop_cycle": plt.cycler(
+        color=["#4f46e5", "#0d9488", "#e11d48", "#f59e0b", "#6366f1", "#10b981"]
+    ),
+})
+
 RESULT_REPR_CAP = 2000
 PREVIEW_ROWS = 10
 
@@ -124,7 +150,7 @@ def main() -> None:
     # Save a figure if the code created one (best effort, even on error).
     try:
         if plt.get_fignums():
-            plt.savefig(args.figure, bbox_inches="tight", dpi=110)
+            plt.savefig(args.figure, bbox_inches="tight", dpi=120, facecolor="white")
             envelope["figure_path"] = args.figure
             if envelope["result_kind"] == "none" and envelope["ok"]:
                 envelope["result_kind"] = "figure"
