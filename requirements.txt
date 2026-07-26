@@ -1,0 +1,13 @@
+# --- Runtime ---
+google-genai>=1.0.0        # Gemini API SDK (from google import genai)
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7
+pyarrow>=14.0             # parquet serialization for the sandbox data handoff
+pydantic-settings>=2.0    # typed config from environment / .env
+python-dotenv>=1.0        # .env loading
+streamlit>=1.30           # UI (used from Level 4 onward)
+
+# --- Dev / test ---
+pytest>=8.0
+ruff>=0.5
