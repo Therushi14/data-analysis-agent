@@ -18,22 +18,28 @@ You have a pandas DataFrame already loaded as `df`. You can use `pd` (pandas),
 `np` (numpy), and `plt` (matplotlib.pyplot).
 
 How to work:
-- Think about what needs to be computed, then call `run_python` with code that
-  computes it. Assign the value that answers the question to a variable named
-  `result` so it is captured and shown back to you.
+- Plan first for anything non-trivial. If the question has several parts or needs
+  multiple analysis steps (inspect -> compute -> visualize), call `plan` once at
+  the start with an ordered list of short sub-tasks. Skip planning for a simple
+  question you can answer in a single run_python call.
+- Then work through the plan with `run_python`: write code that computes one part,
+  and assign the value that answers it to a variable named `result` so it is
+  captured and shown back to you. Address every part of a multi-part question
+  before you finish — do not stop after the first part.
 - Inspect the observation you get back (stdout, any error traceback, a preview
-  of `result`). Take more than one step when a question needs it
-  (e.g. inspect -> compute -> visualize).
+  of `result`) and let it drive your next step.
 - If your code raises an error, read the traceback and rewrite the code to fix
   the actual cause — do not guess around it, and never re-run the exact same
   failing code. If after a couple of honest attempts you still cannot compute the
   answer, call final_answer and explain what went wrong instead of retrying.
 - To make a chart, use matplotlib via `plt`; the figure is captured for you.
+- Work efficiently: you have a limited number of steps, so combine related
+  computations into one run_python call rather than spreading them thin.
 - Never invent numbers. Every figure you state must come from code you ran.
 
-When, and only when, the question is fully answered from real results you
-computed, call `final_answer` with a clear natural-language answer. Reference the
-concrete numbers you found.
+When, and only when, every part of the question is answered from real results you
+computed, call `final_answer` with a clear natural-language answer that covers all
+parts. Reference the concrete numbers you found.
 """
 
 
@@ -56,11 +62,32 @@ def build_initial_user_message(question: str, df: pd.DataFrame) -> str:
     )
 
 
-def observation_payload(result: ExecutionResult, repeated: bool = False) -> dict:
+def plan_ack_payload(plan: list[str]) -> dict:
+    """The tool-result returned when the model calls `plan`.
+
+    Echoes the plan back and nudges the model to execute it, so the sub-tasks
+    stay salient across the multi-step run.
+    """
+    return {
+        "ok": True,
+        "plan": plan,
+        "steps_planned": len(plan),
+        "instruction": (
+            "Plan recorded. Now carry out each step with run_python. Only call "
+            "final_answer once every step is done and grounded in real results."
+        ),
+    }
+
+
+def observation_payload(
+    result: ExecutionResult, repeated: bool = False, plan: list[str] | None = None
+) -> dict:
     """Convert an ExecutionResult into the structured tool-result the model sees.
 
     `repeated` is True when this exact code already failed earlier — we then tell
-    the model to change approach instead of retrying the same thing.
+    the model to change approach instead of retrying the same thing. `plan`, when
+    set, keeps the outstanding sub-tasks salient so the model finishes every part
+    before it answers.
     """
     if result.ok:
         payload: dict = {"ok": True, "result_kind": result.result_kind}
@@ -72,6 +99,7 @@ def observation_payload(result: ExecutionResult, repeated: bool = False) -> dict
             payload["preview"] = result.dataframe_preview
         if result.figure_path:
             payload["figure"] = "A figure was produced and shown to the user."
+        _add_plan_reminder(payload, plan)
         return payload
 
     # Failure (uncaught exception or timeout).
@@ -88,4 +116,14 @@ def observation_payload(result: ExecutionResult, repeated: bool = False) -> dict
             "You already ran this exact code and it failed the same way. Do NOT "
             "repeat it — change your approach (different column, method, or logic)."
         )
+    _add_plan_reminder(payload, plan)
     return payload
+
+
+def _add_plan_reminder(payload: dict, plan: list[str] | None) -> None:
+    """Attach a compact reminder to keep a multi-step plan on track."""
+    if plan:
+        payload["plan_reminder"] = (
+            "Keep working through your plan; only call final_answer once every "
+            "planned step is addressed with real results."
+        )

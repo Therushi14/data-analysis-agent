@@ -333,10 +333,13 @@ Mapped to the design doc's five levels. Each milestone lists tasks and **accepta
 - Add a **retry/step cap** and graceful `status="cap_reached"` best-effort answer.
 - **Acceptance:** an intentionally hard question (needs a fix after a first-try `KeyError`) shows the agent recovering within the cap. `test_orchestrator.py` includes a mocked sequence: error → corrected code → success, asserting the traceback appears in the next prompt.
 
-### M3 — Multi-step / planning (Design doc Level 3)
-- Support questions requiring multiple dependent `run_python` calls (load → inspect → compute → visualize) driven by intermediate observations.
+### M3 — Multi-step / planning (Design doc Level 3) ✅ implemented
+- **Explicit planning:** a third tool, `plan(steps: string[])`, lets the model lay out ordered sub-tasks *before* computing. The prompt tells it to plan first for multi-part questions and skip planning for simple one-shot ones (so easy questions cost no extra call). The plan is stored on `AgentRun.plan` / a `Step(action="plan")` and rendered in the CLI trace and the UI (📋).
+- **Staying on track:** while a plan is active, each observation carries a compact `plan_reminder` so the agent addresses *every* part before calling `final_answer` — the fix for a multi-part question stopping after the first part.
+- Multiple dependent `run_python` calls (inspect → compute → visualize) are driven by intermediate observations, as before.
 - Chart path: model produces a figure; `ExecutionResult.figure_path` set.
-- **Acceptance:** "plot monthly active users and flag the biggest drop" yields a chart + a correct textual flag across ≥2 steps.
+- **Step budget:** default `max_steps` raised 6 → 8 (still within the design doc's 5–8) so a planned, multi-part run has room to finish.
+- **Acceptance:** covered by `test_orchestrator.py` (plan → execute → answer; plan fed back into history; messy plan cleaned; unplanned simple path unchanged) and `test_gemini_adapter.py` (array-of-strings param maps to a Gemini ARRAY schema). "plot X and flag the biggest drop" yields a chart + a correct textual flag across ≥2 steps.
 
 ### M4 — Seniority signals: UI + memory + guardrails polish (Design doc Level 4)
 - `app.py`: dataset upload, question box, **streamed reasoning trace** (each `Step` rendered), final answer + table/chart via `render.py`.
@@ -381,7 +384,7 @@ Mapped to the design doc's five levels. Each milestone lists tasks and **accepta
 |---|---|---|
 | `gemini_api_key` | — (required) | `GEMINI_API_KEY`; never committed. |
 | `gemini_model` | `gemini-3.6-flash` | Latest Flash (free-tier accessible). Override to a Pro model if you have paid quota. |
-| `max_steps` | `6` | Loop cap (design doc suggests 5–8). |
+| `max_steps` | `8` | Loop cap (design doc suggests 5–8); 8 leaves a planned, multi-part run room to finish. |
 | `sandbox_timeout_s` | `15` | Kill runaway code. |
 | `temperature` | `0.1` | Low for reproducible code/evals. |
 | `stdout_char_cap` | `8000` | Truncate observations. |

@@ -154,6 +154,70 @@ def test_is_correction_flag_marks_steps_after_an_error():
     assert run.steps[1].is_correction is True   # follows a failure
 
 
+# --- Level 3: planning / multi-step ---------------------------------------------
+
+def test_plan_then_execute_records_and_uses_plan():
+    llm = FakeLLM([
+        _call("plan", {"steps": ["Compute the sum", "Report it"]}),
+        _call("run_python", {"code": "result = df['x'].sum()"}),
+        _call("final_answer", {"answer": "The sum is 6."}),
+    ])
+    sb = FakeSandbox([ExecutionResult(ok=True, result_kind="scalar", result_repr="6")])
+    run = Orchestrator(llm, sb, max_steps=8).run("sum and report", DF)
+
+    assert run.status == "answered"
+    assert run.planned is True
+    assert run.plan == ["Compute the sum", "Report it"]
+    assert run.n_steps == 3
+    # The plan is its own step, recorded before any code executes.
+    assert run.steps[0].action == "plan"
+    assert run.steps[0].plan == ["Compute the sum", "Report it"]
+    assert run.steps[1].is_correction is False   # a plan is not a failure to recover from
+    assert sb.runs == ["result = df['x'].sum()"]  # planning runs no code
+
+
+def test_plan_is_fed_back_into_history():
+    llm = FakeLLM([
+        _call("plan", {"steps": ["A", "B"]}),
+        _call("run_python", {"code": "result = 1"}),
+        _call("final_answer", {"answer": "done"}),
+    ])
+    sb = FakeSandbox([ExecutionResult(ok=True, result_kind="scalar", result_repr="1")])
+    Orchestrator(llm, sb, max_steps=8).run("q", DF)
+
+    # The model's 2nd call must see the plan acknowledgement as a tool result.
+    second_history = llm.calls[1]
+    plan_turns = [
+        t for t in second_history
+        if t.get("role") == "tool" and t.get("tool_name") == "plan"
+    ]
+    assert plan_turns and plan_turns[0]["response"]["plan"] == ["A", "B"]
+
+
+def test_messy_plan_steps_are_cleaned():
+    # Whitespace-only / empty entries dropped; values coerced to stripped strings.
+    llm = FakeLLM([
+        _call("plan", {"steps": ["  Step one  ", "", "   ", "Step two"]}),
+        _call("final_answer", {"answer": "ok"}),
+    ])
+    run = Orchestrator(llm, FakeSandbox(), max_steps=8).run("q", DF)
+    assert run.plan == ["Step one", "Step two"]
+
+
+def test_no_plan_leaves_run_unplanned():
+    # A simple question that skips planning must still behave exactly as before.
+    llm = FakeLLM([
+        _call("run_python", {"code": "result = df['x'].sum()"}),
+        _call("final_answer", {"answer": "6"}),
+    ])
+    sb = FakeSandbox([ExecutionResult(ok=True, result_kind="scalar", result_repr="6")])
+    run = Orchestrator(llm, sb, max_steps=8).run("sum?", DF)
+
+    assert run.status == "answered"
+    assert run.planned is False
+    assert run.plan == []
+
+
 def test_repeated_failing_code_gets_a_warning():
     # Identical failing code twice -> the 2nd observation carries a repeat warning.
     llm = FakeLLM([

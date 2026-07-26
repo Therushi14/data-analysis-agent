@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 import pandas as pd
 
@@ -28,6 +29,7 @@ from agent.prompts import (
     SYSTEM_PROMPT,
     build_initial_user_message,
     observation_payload,
+    plan_ack_payload,
 )
 from agent.tools.sandbox import Sandbox
 from agent.types import AgentRun, Step
@@ -86,6 +88,15 @@ class Orchestrator:
 
             call: LLMToolCall = response.tool_call
 
+            if call.name == "plan":
+                plan = _coerce_plan(call.args.get("steps"))
+                run.plan = plan
+                history.append(model_tool_call_turn(call, text=response.text))
+                history.append(tool_result_turn("plan", plan_ack_payload(plan)))
+                emit(Step(index=step_index, action="plan",
+                          thought=response.text, plan=plan))
+                continue
+
             if call.name == "final_answer":
                 answer = str(call.args.get("answer", "")).strip()
                 emit(Step(index=step_index, action="final_answer",
@@ -103,7 +114,12 @@ class Orchestrator:
 
                 repeated = code.strip() in failed_codes
                 history.append(
-                    tool_result_turn("run_python", observation_payload(result, repeated=repeated))
+                    tool_result_turn(
+                        "run_python",
+                        observation_payload(
+                            result, repeated=repeated, plan=run.plan or None
+                        ),
+                    )
                 )
                 emit(Step(index=step_index, action="run_python", thought=response.text,
                           code=code, observation=result, is_correction=prev_failed))
@@ -141,6 +157,19 @@ class Orchestrator:
 
         run.usage = total_usage
         return run
+
+
+def _coerce_plan(raw: Any) -> list[str]:
+    """Normalize the model's `steps` argument into a clean list of sub-task strings.
+
+    Gemini may hand back a proto list; a stray string is tolerated too. Empty and
+    whitespace-only entries are dropped.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raw = [raw]
+    return [s for s in (str(item).strip() for item in raw) if s]
 
 
 def _accumulate_usage(total: dict, usage: dict | None) -> None:

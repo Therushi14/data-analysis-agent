@@ -9,9 +9,10 @@ The thing that makes this an *agent* (not a single LLM call) is the loop:
 max-iteration guard. The LLM is **Google Gemini** (via `google-genai`), behind a
 provider-agnostic interface so it can be swapped.
 
-> Status: **Levels 1–2 + Streamlit UI** implemented — the reason → act → observe
-> → self-correct loop runs end to end, with a repair budget and a browser UI. See
-> [plan.md](plan.md) for the full roadmap (planning, memory, evals).
+> Status: **Levels 1–3 + Streamlit UI** implemented — the reason → act → observe
+> → self-correct loop runs end to end, with up-front **planning** for multi-part
+> questions, a repair budget, and a browser UI. See [plan.md](plan.md) for the
+> full roadmap (memory, evals).
 
 ---
 
@@ -30,7 +31,7 @@ Question + CSV
       │
       ▼
 Orchestrator (hand-rolled loop)  ◄──► LLMClient ──► Gemini adapter
-      │        ▲                          (function calling: run_python / final_answer)
+      │        ▲                          (function calling: plan / run_python / final_answer)
       ▼        │ observation
    Sandbox (subprocess) ── worker.py execs code, captures result/traceback/figure
 ```
@@ -110,6 +111,21 @@ both the CLI and the UI. Three guards keep it honest and cheap:
 - **Recovery tracking**: `AgentRun` exposes `n_errors` and `recovered`, so a run
   that hit an error and still answered is reported as a recovery.
 
+## Planning (multi-step questions)
+
+For anything beyond a one-liner, the agent **plans before it computes**. It calls
+a `plan` tool with an ordered list of sub-tasks, then works through them — so a
+multi-part question ("total km, *and* average price by doors, *and* plot the
+distribution") gets fully answered instead of stopping after the first part.
+
+- The plan is shown in the trace as a 📋 step (CLI and UI) and recorded on
+  `AgentRun.plan`.
+- While a plan is active, every observation carries a short reminder to finish
+  **all** planned parts before the final answer.
+- Planning is **optional**: a simple question skips it and answers in a single
+  step, so easy questions cost no extra API call. The step cap is 8 (`MAX_STEPS`),
+  leaving a planned run room to finish.
+
 ## Safety (the guardrails story)
 
 Model-written Python never runs in the app process. `agent/tools/sandbox.py`
@@ -133,8 +149,8 @@ pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adap
 ```
 
 - `test_sandbox.py` — success / dataframe / error traceback / blocked import / timeout / figure.
-- `test_orchestrator.py` — happy path, self-correction (error fed back), step cap, plain-text answer.
-- `test_gemini_adapter.py` — history↔Gemini translation and response parsing (no network).
+- `test_orchestrator.py` — happy path, self-correction (error fed back), step cap, plain-text answer, planning (plan → execute → answer, plan fed back, unplanned path unchanged).
+- `test_gemini_adapter.py` — history↔Gemini translation, response parsing, and array-param (plan) schema mapping (no network).
 
 ## Roadmap
 
@@ -142,7 +158,7 @@ pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adap
 |---|---|---|
 | 1 | Core loop (reason → act → observe → answer) | ✅ implemented |
 | 2 | Self-correction: repair budget, repeat-guard, correction tagging | ✅ implemented |
-| 3 | Planning / multi-step + charts | partial (charts land now) |
+| 3 | Planning / multi-step decomposition + charts | ✅ implemented |
 | 4 | Streamlit UI (live trace + inline charts) · session memory · deploy | UI ✅; memory/deploy planned |
 | 5 | Eval harness + before/after accuracy | planned |
 

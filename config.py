@@ -34,8 +34,10 @@ class Settings(BaseSettings):
     temperature: float = 0.1
     request_timeout_s: int = 60  # hard per-request cap so a call can't hang forever
 
-    # Agent loop
-    max_steps: int = 6
+    # Agent loop. 8 gives a planned, multi-part question room to finish (one step
+    # for the plan, plus a few compute/visualize steps) — within the 5-8 the
+    # design doc suggests. Simple questions still finish well under the cap.
+    max_steps: int = 8
     # Repair budget: give up after this many *consecutive* failed executions
     # (resets on any success). Stops a broken question from burning every step.
     max_consecutive_failures: int = 3

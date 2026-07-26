@@ -45,11 +45,12 @@ class Step:
     """One iteration of the reason -> act -> observe loop."""
 
     index: int
-    action: str  # "run_python" | "final_answer"
+    action: str  # "plan" | "run_python" | "final_answer"
     thought: str | None = None
     code: str | None = None
     observation: ExecutionResult | None = None
     final_answer: str | None = None
+    plan: list[str] | None = None  # set on a "plan" step: the ordered sub-tasks
     is_correction: bool = False  # this run_python follows a failed one (self-correction)
 
 
@@ -63,11 +64,17 @@ class AgentRun:
     status: str = "error"  # "answered" | "cap_reached" | "failed" | "error"
     figure_path: str | None = None
     final_table_md: str | None = None
+    plan: list[str] = field(default_factory=list)  # the agent's up-front sub-tasks, if it planned
     usage: dict[str, Any] = field(default_factory=dict)
 
     @property
     def n_steps(self) -> int:
         return len(self.steps)
+
+    @property
+    def planned(self) -> bool:
+        """Did the agent lay out an explicit multi-step plan before executing?"""
+        return len(self.plan) > 0
 
     @property
     def n_errors(self) -> int:

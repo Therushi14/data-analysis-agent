@@ -53,7 +53,7 @@ def resolve_keys(settings) -> list[str]:
 
 def render_step(step: Step) -> None:
     """Render one loop step as it completes (live trace)."""
-    icon = {"run_python": "🐍", "final_answer": "✅"}.get(step.action, "•")
+    icon = {"plan": "📋", "run_python": "🐍", "final_answer": "✅"}.get(step.action, "•")
     label = f"{icon} Step {step.index} — {step.action}"
     if step.is_correction:
         label = f"🔧 Step {step.index} — {step.action} (self-correcting)"
@@ -62,6 +62,9 @@ def render_step(step: Step) -> None:
             st.caption("↳ retrying after the previous step's error")
         if step.thought:
             st.markdown(step.thought)
+        if step.plan:
+            st.markdown("**Plan**")
+            st.markdown("\n".join(f"{i}. {task}" for i, task in enumerate(step.plan, 1)))
         if step.code:
             st.code(step.code, language="python")
 
@@ -224,8 +227,9 @@ def main() -> None:
         else:
             st.warning(f"Hit {run.n_errors} error(s) and could not recover.")
 
+    plan_note = f"planned {len(run.plan)} steps · " if run.planned else ""
     st.caption(
-        f"status: {run.status} · steps: {run.n_steps} · errors: {run.n_errors} · "
+        f"{plan_note}status: {run.status} · steps: {run.n_steps} · errors: {run.n_errors} · "
         f"tokens: {run.usage.get('total_tokens', '?')} · model: {model}"
     )
 

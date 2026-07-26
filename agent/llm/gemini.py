@@ -37,15 +37,27 @@ _TYPE_MAP = {
 }
 
 
+def _schema(info: dict[str, Any]) -> types.Schema:
+    """Translate one neutral parameter spec into a Gemini Schema (arrays included)."""
+    kind = info.get("type", "string")
+    if kind == "array":
+        item_info = info.get("items", {"type": "string"})
+        return types.Schema(
+            type=types.Type.ARRAY,
+            items=_schema(item_info),
+            description=info.get("description"),
+        )
+    return types.Schema(
+        type=_TYPE_MAP.get(kind, types.Type.STRING),
+        description=info.get("description"),
+    )
+
+
 def _build_tool(tool_specs: list[dict[str, Any]]) -> types.Tool:
     declarations = []
     for spec in tool_specs:
         properties = {
-            name: types.Schema(
-                type=_TYPE_MAP.get(info["type"], types.Type.STRING),
-                description=info.get("description"),
-            )
-            for name, info in spec["parameters"].items()
+            name: _schema(info) for name, info in spec["parameters"].items()
         }
         declarations.append(
             types.FunctionDeclaration(

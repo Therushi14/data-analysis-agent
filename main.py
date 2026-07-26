@@ -37,6 +37,10 @@ def print_step(step: Step) -> None:
     print(f"\n--- Step {step.index}: {step.action}{marker} ---")
     if step.thought:
         print(f"thought: {step.thought.strip()}")
+    if step.plan:
+        print("📋 plan:")
+        for i, task in enumerate(step.plan, 1):
+            print(f"    {i}. {task}")
     if step.code:
         print("code:")
         for line in step.code.strip().splitlines():

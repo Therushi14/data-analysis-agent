@@ -9,6 +9,8 @@ import pytest
 
 pytest.importorskip("google.genai")
 
+from google.genai import types  # noqa: E402
+
 from agent.llm.base import (  # noqa: E402
     TOOL_SPECS,
     LLMToolCall,
@@ -37,10 +39,20 @@ def test_to_contents_maps_roles_and_parts():
     assert contents[2].parts[0].function_response.name == "run_python"
 
 
-def test_build_tool_declares_both_functions():
+def test_build_tool_declares_all_functions():
     tool = _build_tool(TOOL_SPECS)
     names = [d.name for d in tool.function_declarations]
-    assert names == ["run_python", "final_answer"]
+    assert names == ["plan", "run_python", "final_answer"]
+
+
+def test_build_tool_supports_array_param():
+    # The `plan` tool's `steps` is an array-of-strings — the adapter must map it
+    # to a Gemini ARRAY schema with a STRING item type.
+    tool = _build_tool(TOOL_SPECS)
+    plan_decl = next(d for d in tool.function_declarations if d.name == "plan")
+    steps = plan_decl.parameters.properties["steps"]
+    assert steps.type == types.Type.ARRAY
+    assert steps.items.type == types.Type.STRING
 
 
 class _FakeFunctionCall:

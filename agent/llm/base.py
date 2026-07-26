@@ -53,6 +53,29 @@ class LLMClient(Protocol):
 
 TOOL_SPECS: list[dict[str, Any]] = [
     {
+        "name": "plan",
+        "description": (
+            "Lay out an ordered list of the sub-tasks you will carry out to answer "
+            "a non-trivial or multi-part question, BEFORE you start computing. Call "
+            "this first whenever the question has several parts or needs multiple "
+            "analysis steps (inspect -> compute -> visualize). Skip it for a simple "
+            "one-shot question you can answer with a single run_python call. You may "
+            "revise the plan later by calling plan again."
+        ),
+        "parameters": {
+            "steps": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Ordered, short sub-tasks — e.g. "
+                    "['Compute total kilometres', 'Average price by number of doors', "
+                    "'Plot the price distribution']."
+                ),
+            }
+        },
+        "required": ["steps"],
+    },
+    {
         "name": "run_python",
         "description": (
             "Execute Python against the loaded pandas DataFrame `df`. "
