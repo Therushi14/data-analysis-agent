@@ -18,8 +18,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Secrets
+    # Secrets. A backup key (typically a different project) is used automatically
+    # when the primary hits its quota — free-tier limits are per-project-per-model.
     gemini_api_key: str | None = None
+    gemini_api_key_backup: str | None = None
+
+    @property
+    def api_keys(self) -> list[str]:
+        """Keys in priority order (primary first), empties dropped."""
+        return [k for k in (self.gemini_api_key, self.gemini_api_key_backup) if k]
 
     # LLM. Default to the latest Flash: Pro tiers require paid quota, and older
     # 2.5 models 404 for newly-created keys. Override GEMINI_MODEL in .env.

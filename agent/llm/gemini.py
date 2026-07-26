@@ -14,12 +14,20 @@ if a model 404s or 429s.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from google import genai
 from google.genai import types
 
 from agent.llm.base import LLMResponse, LLMToolCall
+
+logger = logging.getLogger(__name__)
+
+
+def _is_rate_limit(err: Exception) -> bool:
+    """True for a quota / rate-limit (429 RESOURCE_EXHAUSTED) error."""
+    return getattr(err, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(err)
 
 _TYPE_MAP = {
     "string": types.Type.STRING,
@@ -134,17 +142,20 @@ class GeminiClient:
 
     def __init__(
         self,
-        api_key: str | None,
+        api_keys: list[str] | str,
         model: str = "gemini-3.6-flash",
         temperature: float = 0.1,
         request_timeout_s: int = 60,
     ) -> None:
-        if not api_key:
+        if isinstance(api_keys, str):
+            api_keys = [api_keys]
+        keys = [k for k in api_keys if k]
+        if not keys:
             raise ValueError(
-                "GEMINI_API_KEY is not set. Add it to your .env or environment."
+                "No GEMINI_API_KEY set. Add it to your .env or environment."
             )
         # Bound the SDK's retry/backoff and cap each request, so a rate-limited
-        # (429) free-tier key fails fast with a clear error instead of hanging.
+        # (429) key fails fast (then we fail over to the next key) instead of hanging.
         http_options = types.HttpOptions(
             timeout=request_timeout_s * 1000,  # milliseconds
             retry_options=types.HttpRetryOptions(
@@ -154,7 +165,8 @@ class GeminiClient:
                 http_status_codes=[429, 503],
             ),
         )
-        self.client = genai.Client(api_key=api_key, http_options=http_options)
+        self._clients = [genai.Client(api_key=k, http_options=http_options) for k in keys]
+        self._idx = 0  # index of the key currently in use
         self.model = model
         self.temperature = temperature
 
@@ -169,9 +181,25 @@ class GeminiClient:
             temperature=self.temperature,
             tools=[_build_tool(tools)],
         )
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=to_contents(history),
-            config=config,
-        )
-        return parse_response(response)
+        contents = to_contents(history)
+
+        # Try each key in turn, starting from the one currently in use. On a
+        # quota/rate-limit error, advance to the next key and stick with it.
+        n = len(self._clients)
+        for attempt in range(n):
+            try:
+                response = self._clients[self._idx].models.generate_content(
+                    model=self.model, contents=contents, config=config
+                )
+                return parse_response(response)
+            except Exception as e:  # noqa: BLE001 - re-raised unless it's a rate limit
+                if _is_rate_limit(e) and attempt < n - 1:
+                    nxt = (self._idx + 1) % n
+                    logger.warning(
+                        "API key #%d hit its quota; failing over to key #%d",
+                        self._idx + 1, nxt + 1,
+                    )
+                    self._idx = nxt
+                    continue
+                raise
+        raise RuntimeError("unreachable")  # loop always returns or raises

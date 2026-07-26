@@ -103,14 +103,17 @@ def main() -> None:
         stdout_char_cap=settings.stdout_char_cap,
     )
     llm = GeminiClient(
-        api_key=settings.gemini_api_key,
+        api_keys=settings.api_keys,
         model=model,
         temperature=settings.temperature,
         request_timeout_s=settings.request_timeout_s,
     )
     orchestrator = Orchestrator(llm=llm, sandbox=sandbox, max_steps=settings.max_steps)
 
-    print(f"(model: {model} | max_steps: {settings.max_steps} | timeout: {settings.request_timeout_s}s)")
+    print(
+        f"(model: {model} | keys: {len(settings.api_keys)} | "
+        f"max_steps: {settings.max_steps} | timeout: {settings.request_timeout_s}s)"
+    )
     print_header(args.question)
     try:
         run = orchestrator.run(args.question, df, on_step=print_step)
@@ -119,9 +122,9 @@ def main() -> None:
         print(f"\n[Gemini API error] {msg[:300]}")
         if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
             print(
-                "\n>> This is the free-tier rate limit, not a hang. Wait ~30-60s "
-                "and retry. (Pro models need paid quota; don't switch unless you "
-                "have it.)"
+                "\n>> All configured keys hit the free-tier limit, not a hang. "
+                "Wait for the daily reset, add another GEMINI_API_KEY_BACKUP, "
+                "switch GEMINI_MODEL to a different flash model, or enable billing."
             )
         return
     print_footer(run)
