@@ -74,6 +74,27 @@ the daily reset, switch `GEMINI_MODEL` to a different flash model (each model ha
 its own daily quota), use a key from a different project, or enable billing. The
 CLI caps each request at 60s and shows a clear message instead of hanging.
 
+## Web UI (Streamlit)
+
+Prefer clicking to typing? Run the UI:
+
+```bash
+streamlit run app.py
+```
+
+It opens in your browser and lets you:
+
+- upload a CSV (or use the bundled sample);
+- pick the **model** and **max steps** in the sidebar (handy for dodging the
+  per-model daily quota);
+- ask a question and watch the **reasoning trace stream live** (each step's code
+  and result);
+- see the final answer with any **chart rendered inline** and tables shown;
+- keep previous questions (and their charts) visible for the session.
+
+Keys are read from `.env` locally, or from Streamlit **secrets** when deployed
+(`GEMINI_API_KEY` / `GEMINI_API_KEY_BACKUP`). The same failover applies.
+
 ## Safety (the guardrails story)
 
 Model-written Python never runs in the app process. `agent/tools/sandbox.py`
@@ -107,7 +128,7 @@ pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adap
 | 1 | Core loop (reason → act → observe → answer) | ✅ implemented |
 | 2 | Self-correction (traceback fed back, retry cap) | wired; deepen next |
 | 3 | Planning / multi-step + charts | partial (charts land now) |
-| 4 | Streamlit UI, session memory, deploy | planned |
+| 4 | Streamlit UI (live trace + inline charts) · session memory · deploy | UI ✅; memory/deploy planned |
 | 5 | Eval harness + before/after accuracy | planned |
 
 See [plan.md](plan.md) for the full plan, interface contracts, and milestone
