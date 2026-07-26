@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # 2.5 models 404 for newly-created keys. Override GEMINI_MODEL in .env.
     gemini_model: str = "gemini-3.6-flash"
     temperature: float = 0.1
+    request_timeout_s: int = 60  # hard per-request cap so a call can't hang forever
 
     # Agent loop
     max_steps: int = 6

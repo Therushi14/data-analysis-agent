@@ -67,6 +67,13 @@ tier), and older `gemini-2.5-*` IDs may 404 for new keys. The adapter handles
 Gemini 3.x thought-signatures, so 3.x models work out of the box. Change the
 model via `GEMINI_MODEL` in `.env`.
 
+**Free-tier quota.** The free tier allows ~**20 requests/day _per model_** (and a
+low per-minute rate). Each question costs a few requests, so you get roughly
+5–8 questions/day on one model. If you hit `RESOURCE_EXHAUSTED (429)`: wait for
+the daily reset, switch `GEMINI_MODEL` to a different flash model (each model has
+its own daily quota), use a key from a different project, or enable billing. The
+CLI caps each request at 60s and shows a clear message instead of hanging.
+
 ## Safety (the guardrails story)
 
 Model-written Python never runs in the app process. `agent/tools/sandbox.py`

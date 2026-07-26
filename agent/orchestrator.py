@@ -12,6 +12,7 @@ A max-iteration cap guards against infinite loops and runaway cost.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import pandas as pd
 
@@ -40,24 +41,33 @@ class Orchestrator:
         self.sandbox = sandbox
         self.max_steps = max_steps
 
-    def run(self, question: str, df: pd.DataFrame) -> AgentRun:
+    def run(
+        self,
+        question: str,
+        df: pd.DataFrame,
+        on_step: Callable[[Step], None] | None = None,
+    ) -> AgentRun:
         self.sandbox.prepare_data(df)
 
         run = AgentRun(question=question)
         history = [user_turn(build_initial_user_message(question, df))]
         total_usage: dict = {"prompt_tokens": 0, "candidate_tokens": 0, "total_tokens": 0}
 
+        def emit(step: Step) -> None:
+            run.steps.append(step)
+            if on_step is not None:
+                on_step(step)
+
         for step_index in range(1, self.max_steps + 1):
+            logger.info("step %d: asking the model...", step_index)
             response = self.llm.generate(SYSTEM_PROMPT, history, TOOL_SPECS)
             _accumulate_usage(total_usage, response.usage)
 
             # No tool call -> the model answered directly in text.
             if response.tool_call is None:
                 answer = (response.text or "").strip()
-                run.steps.append(
-                    Step(index=step_index, action="final_answer",
-                         thought=response.text, final_answer=answer)
-                )
+                emit(Step(index=step_index, action="final_answer",
+                          thought=response.text, final_answer=answer))
                 run.final_answer = answer
                 run.status = "answered"
                 break
@@ -66,10 +76,8 @@ class Orchestrator:
 
             if call.name == "final_answer":
                 answer = str(call.args.get("answer", "")).strip()
-                run.steps.append(
-                    Step(index=step_index, action="final_answer",
-                         thought=response.text, final_answer=answer)
-                )
+                emit(Step(index=step_index, action="final_answer",
+                          thought=response.text, final_answer=answer))
                 run.final_answer = answer
                 run.status = "answered"
                 break
@@ -79,13 +87,11 @@ class Orchestrator:
                 history.append(model_tool_call_turn(call, text=response.text))
 
                 result = self.sandbox.run(code)
-                logger.info("step %d run_python -> %s", step_index, result.short_summary())
+                logger.debug("step %d run_python -> %s", step_index, result.short_summary())
 
                 history.append(tool_result_turn("run_python", observation_payload(result)))
-                run.steps.append(
-                    Step(index=step_index, action="run_python", thought=response.text,
-                         code=code, observation=result)
-                )
+                emit(Step(index=step_index, action="run_python", thought=response.text,
+                          code=code, observation=result))
                 if result.figure_path:
                     run.figure_path = result.figure_path
                 if result.dataframe_preview:
@@ -97,9 +103,7 @@ class Orchestrator:
             history.append(
                 tool_result_turn(call.name, {"ok": False, "error": f"unknown tool '{call.name}'"})
             )
-            run.steps.append(
-                Step(index=step_index, action=call.name, thought=response.text)
-            )
+            emit(Step(index=step_index, action=call.name, thought=response.text))
         else:
             # Loop fell through without a final answer: cap reached.
             run.status = "cap_reached"

@@ -137,12 +137,24 @@ class GeminiClient:
         api_key: str | None,
         model: str = "gemini-3.6-flash",
         temperature: float = 0.1,
+        request_timeout_s: int = 60,
     ) -> None:
         if not api_key:
             raise ValueError(
                 "GEMINI_API_KEY is not set. Add it to your .env or environment."
             )
-        self.client = genai.Client(api_key=api_key)
+        # Bound the SDK's retry/backoff and cap each request, so a rate-limited
+        # (429) free-tier key fails fast with a clear error instead of hanging.
+        http_options = types.HttpOptions(
+            timeout=request_timeout_s * 1000,  # milliseconds
+            retry_options=types.HttpRetryOptions(
+                attempts=3,
+                initial_delay=1.0,
+                max_delay=15.0,
+                http_status_codes=[429, 503],
+            ),
+        )
+        self.client = genai.Client(api_key=api_key, http_options=http_options)
         self.model = model
         self.temperature = temperature
 
