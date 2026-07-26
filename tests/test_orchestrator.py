@@ -96,3 +96,78 @@ def test_plain_text_final_answer():
     assert run.status == "answered"
     assert run.final_answer == "It is 6."
     assert run.n_steps == 1
+
+
+# --- Level 2: self-correction ---------------------------------------------------
+
+def test_gives_up_after_consecutive_failures():
+    # Model keeps trying, sandbox keeps failing: stop at the repair budget,
+    # NOT at max_steps (so we don't burn every API call on a hopeless question).
+    llm = FakeLLM([_call("run_python", {"code": f"broken_{i}"}) for i in range(10)])
+    sb = FakeSandbox([
+        ExecutionResult(ok=False, error_traceback="KeyError: 'x'") for _ in range(10)
+    ])
+    run = Orchestrator(llm, sb, max_steps=8, max_consecutive_failures=3).run("q", DF)
+
+    assert run.status == "failed"
+    assert run.n_steps == 3            # stopped at the failure cap
+    assert len(sb.runs) == 3
+    assert run.n_errors == 3
+    assert run.recovered is False
+    assert "last error" in (run.final_answer or "").lower()
+
+
+def test_recovery_resets_the_failure_counter():
+    # Two failures then a success must reset the counter, so the run continues
+    # and answers rather than giving up.
+    llm = FakeLLM([
+        _call("run_python", {"code": "bad1"}),
+        _call("run_python", {"code": "bad2"}),
+        _call("run_python", {"code": "good"}),
+        _call("final_answer", {"answer": "6"}),
+    ])
+    sb = FakeSandbox([
+        ExecutionResult(ok=False, error_traceback="E1"),
+        ExecutionResult(ok=False, error_traceback="E2"),
+        ExecutionResult(ok=True, result_kind="scalar", result_repr="6"),
+    ])
+    run = Orchestrator(llm, sb, max_steps=8, max_consecutive_failures=3).run("q", DF)
+
+    assert run.status == "answered"
+    assert run.n_errors == 2
+    assert run.recovered is True
+
+
+def test_is_correction_flag_marks_steps_after_an_error():
+    llm = FakeLLM([
+        _call("run_python", {"code": "bad"}),
+        _call("run_python", {"code": "good"}),
+        _call("final_answer", {"answer": "ok"}),
+    ])
+    sb = FakeSandbox([
+        ExecutionResult(ok=False, error_traceback="E"),
+        ExecutionResult(ok=True, result_kind="scalar", result_repr="1"),
+    ])
+    run = Orchestrator(llm, sb, max_steps=6, max_consecutive_failures=3).run("q", DF)
+
+    assert run.steps[0].is_correction is False  # first attempt, nothing to correct
+    assert run.steps[1].is_correction is True   # follows a failure
+
+
+def test_repeated_failing_code_gets_a_warning():
+    # Identical failing code twice -> the 2nd observation carries a repeat warning.
+    llm = FakeLLM([
+        _call("run_python", {"code": "df['bad']"}),
+        _call("run_python", {"code": "df['bad']"}),  # byte-identical
+        _call("final_answer", {"answer": "x"}),
+    ])
+    sb = FakeSandbox([
+        ExecutionResult(ok=False, error_traceback="KeyError"),
+        ExecutionResult(ok=False, error_traceback="KeyError"),
+    ])
+    run = Orchestrator(llm, sb, max_steps=6, max_consecutive_failures=5).run("q", DF)
+
+    third_history = llm.calls[2]  # history sent to the 3rd model call
+    tool_turns = [t for t in third_history if t.get("role") == "tool"]
+    assert any("repeat_warning" in t.get("response", {}) for t in tool_turns)
+    assert run.status == "answered"

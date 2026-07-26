@@ -33,7 +33,8 @@ def print_header(question: str) -> None:
 
 def print_step(step: Step) -> None:
     """Print one step as soon as it completes (live progress)."""
-    print(f"\n--- Step {step.index}: {step.action} ---")
+    marker = "  🔧 self-correcting" if step.is_correction else ""
+    print(f"\n--- Step {step.index}: {step.action}{marker} ---")
     if step.thought:
         print(f"thought: {step.thought.strip()}")
     if step.code:
@@ -58,6 +59,9 @@ def print_footer(run: AgentRun) -> None:
     print(f"ANSWER: {run.final_answer}")
     if run.figure_path:
         print(f"FIGURE: {run.figure_path}")
+    if run.n_errors:
+        note = "recovered ✓" if run.recovered else "did not recover"
+        print(f"ERRORS: {run.n_errors} ({note} via self-correction)")
     if run.usage:
         print(f"USAGE: {run.usage}")
     print("=" * 70 + "\n", flush=True)
@@ -108,7 +112,12 @@ def main() -> None:
         temperature=settings.temperature,
         request_timeout_s=settings.request_timeout_s,
     )
-    orchestrator = Orchestrator(llm=llm, sandbox=sandbox, max_steps=settings.max_steps)
+    orchestrator = Orchestrator(
+        llm=llm,
+        sandbox=sandbox,
+        max_steps=settings.max_steps,
+        max_consecutive_failures=settings.max_consecutive_failures,
+    )
 
     print(
         f"(model: {model} | keys: {len(settings.api_keys)} | "

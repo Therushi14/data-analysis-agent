@@ -50,6 +50,7 @@ class Step:
     code: str | None = None
     observation: ExecutionResult | None = None
     final_answer: str | None = None
+    is_correction: bool = False  # this run_python follows a failed one (self-correction)
 
 
 @dataclass
@@ -59,7 +60,7 @@ class AgentRun:
     question: str
     steps: list[Step] = field(default_factory=list)
     final_answer: str | None = None
-    status: str = "error"  # "answered" | "cap_reached" | "error"
+    status: str = "error"  # "answered" | "cap_reached" | "failed" | "error"
     figure_path: str | None = None
     final_table_md: str | None = None
     usage: dict[str, Any] = field(default_factory=dict)
@@ -67,3 +68,15 @@ class AgentRun:
     @property
     def n_steps(self) -> int:
         return len(self.steps)
+
+    @property
+    def n_errors(self) -> int:
+        """How many code executions failed across the run."""
+        return sum(
+            1 for s in self.steps if s.observation is not None and not s.observation.ok
+        )
+
+    @property
+    def recovered(self) -> bool:
+        """Errored at least once but still reached a grounded answer (self-correction won)."""
+        return self.n_errors > 0 and self.status == "answered"

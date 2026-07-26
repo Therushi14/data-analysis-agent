@@ -54,7 +54,12 @@ def resolve_keys(settings) -> list[str]:
 def render_step(step: Step) -> None:
     """Render one loop step as it completes (live trace)."""
     icon = {"run_python": "🐍", "final_answer": "✅"}.get(step.action, "•")
-    with st.expander(f"{icon} Step {step.index} — {step.action}", expanded=True):
+    label = f"{icon} Step {step.index} — {step.action}"
+    if step.is_correction:
+        label = f"🔧 Step {step.index} — {step.action} (self-correcting)"
+    with st.expander(label, expanded=True):
+        if step.is_correction:
+            st.caption("↳ retrying after the previous step's error")
         if step.thought:
             st.markdown(step.thought)
         if step.code:
@@ -173,7 +178,12 @@ def main() -> None:
         temperature=settings.temperature,
         request_timeout_s=settings.request_timeout_s,
     )
-    orchestrator = Orchestrator(llm=llm, sandbox=sandbox, max_steps=max_steps)
+    orchestrator = Orchestrator(
+        llm=llm,
+        sandbox=sandbox,
+        max_steps=max_steps,
+        max_consecutive_failures=settings.max_consecutive_failures,
+    )
 
     st.subheader("🧠 Reasoning trace")
     trace_area = st.container()
@@ -208,8 +218,14 @@ def main() -> None:
     if run.figure_path:
         st.image(run.figure_path, caption="Generated chart")
 
+    if run.n_errors:
+        if run.recovered:
+            st.info(f"🔧 Self-corrected: hit {run.n_errors} error(s) and recovered.")
+        else:
+            st.warning(f"Hit {run.n_errors} error(s) and could not recover.")
+
     st.caption(
-        f"status: {run.status} · steps: {run.n_steps} · "
+        f"status: {run.status} · steps: {run.n_steps} · errors: {run.n_errors} · "
         f"tokens: {run.usage.get('total_tokens', '?')} · model: {model}"
     )
 

@@ -9,9 +9,9 @@ The thing that makes this an *agent* (not a single LLM call) is the loop:
 max-iteration guard. The LLM is **Google Gemini** (via `google-genai`), behind a
 provider-agnostic interface so it can be swapped.
 
-> Status: **Level 1 (core loop)** implemented — reason → act → observe → answer,
-> end to end, over a hand-rolled loop. See [plan.md](plan.md) for the full
-> roadmap (self-correction, planning, UI, evals).
+> Status: **Levels 1–2 + Streamlit UI** implemented — the reason → act → observe
+> → self-correct loop runs end to end, with a repair budget and a browser UI. See
+> [plan.md](plan.md) for the full roadmap (planning, memory, evals).
 
 ---
 
@@ -95,6 +95,21 @@ It opens in your browser and lets you:
 Keys are read from `.env` locally, or from Streamlit **secrets** when deployed
 (`GEMINI_API_KEY` / `GEMINI_API_KEY_BACKUP`). The same failover applies.
 
+## Self-correction (the centerpiece)
+
+When generated code raises, the traceback is fed back as the next observation and
+the agent rewrites its code — you'll see steps tagged **🔧 self-correcting** in
+both the CLI and the UI. Three guards keep it honest and cheap:
+
+- **Repair budget** (`MAX_CONSECUTIVE_FAILURES`, default 3): after N *consecutive*
+  failed executions the agent stops with `status="failed"` and a message citing
+  the last error, instead of burning every step (and API call). The counter
+  resets on any success.
+- **Repeat guard**: if the model re-emits byte-identical code that already failed,
+  the observation tells it to change approach rather than loop.
+- **Recovery tracking**: `AgentRun` exposes `n_errors` and `recovered`, so a run
+  that hit an error and still answered is reported as a recovery.
+
 ## Safety (the guardrails story)
 
 Model-written Python never runs in the app process. `agent/tools/sandbox.py`
@@ -126,7 +141,7 @@ pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adap
 | Level | Focus | Status |
 |---|---|---|
 | 1 | Core loop (reason → act → observe → answer) | ✅ implemented |
-| 2 | Self-correction (traceback fed back, retry cap) | wired; deepen next |
+| 2 | Self-correction: repair budget, repeat-guard, correction tagging | ✅ implemented |
 | 3 | Planning / multi-step + charts | partial (charts land now) |
 | 4 | Streamlit UI (live trace + inline charts) · session memory · deploy | UI ✅; memory/deploy planned |
 | 5 | Eval harness + before/after accuracy | planned |

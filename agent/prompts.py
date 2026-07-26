@@ -24,8 +24,10 @@ How to work:
 - Inspect the observation you get back (stdout, any error traceback, a preview
   of `result`). Take more than one step when a question needs it
   (e.g. inspect -> compute -> visualize).
-- If your code raises an error, read the traceback and rewrite the code. Do not
-  guess around a failure; fix the actual cause.
+- If your code raises an error, read the traceback and rewrite the code to fix
+  the actual cause — do not guess around it, and never re-run the exact same
+  failing code. If after a couple of honest attempts you still cannot compute the
+  answer, call final_answer and explain what went wrong instead of retrying.
 - To make a chart, use matplotlib via `plt`; the figure is captured for you.
 - Never invent numbers. Every figure you state must come from code you ran.
 
@@ -54,20 +56,36 @@ def build_initial_user_message(question: str, df: pd.DataFrame) -> str:
     )
 
 
-def observation_payload(result: ExecutionResult) -> dict:
-    """Convert an ExecutionResult into the structured tool-result the model sees."""
-    if result.timed_out:
-        return {"ok": False, "error": result.error_traceback}
-    if not result.ok:
-        return {"ok": False, "error_traceback": result.error_traceback, "stdout": result.stdout}
+def observation_payload(result: ExecutionResult, repeated: bool = False) -> dict:
+    """Convert an ExecutionResult into the structured tool-result the model sees.
 
-    payload: dict = {"ok": True, "result_kind": result.result_kind}
-    if result.stdout.strip():
-        payload["stdout"] = result.stdout
-    if result.result_repr:
-        payload["result"] = result.result_repr
-    if result.dataframe_preview:
-        payload["preview"] = result.dataframe_preview
-    if result.figure_path:
-        payload["figure"] = "A figure was produced and shown to the user."
+    `repeated` is True when this exact code already failed earlier — we then tell
+    the model to change approach instead of retrying the same thing.
+    """
+    if result.ok:
+        payload: dict = {"ok": True, "result_kind": result.result_kind}
+        if result.stdout.strip():
+            payload["stdout"] = result.stdout
+        if result.result_repr:
+            payload["result"] = result.result_repr
+        if result.dataframe_preview:
+            payload["preview"] = result.dataframe_preview
+        if result.figure_path:
+            payload["figure"] = "A figure was produced and shown to the user."
+        return payload
+
+    # Failure (uncaught exception or timeout).
+    payload = {"ok": False}
+    if result.timed_out:
+        payload["error"] = result.error_traceback
+        payload["hint"] = "The code was too slow (possibly an infinite loop). Simplify it."
+    else:
+        payload["error_traceback"] = result.error_traceback
+        if result.stdout.strip():
+            payload["stdout"] = result.stdout
+    if repeated:
+        payload["repeat_warning"] = (
+            "You already ran this exact code and it failed the same way. Do NOT "
+            "repeat it — change your approach (different column, method, or logic)."
+        )
     return payload

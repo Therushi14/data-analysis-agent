@@ -36,10 +36,17 @@ logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
-    def __init__(self, llm: LLMClient, sandbox: Sandbox, max_steps: int = 6) -> None:
+    def __init__(
+        self,
+        llm: LLMClient,
+        sandbox: Sandbox,
+        max_steps: int = 6,
+        max_consecutive_failures: int = 3,
+    ) -> None:
         self.llm = llm
         self.sandbox = sandbox
         self.max_steps = max_steps
+        self.max_consecutive_failures = max_consecutive_failures
 
     def run(
         self,
@@ -52,6 +59,11 @@ class Orchestrator:
         run = AgentRun(question=question)
         history = [user_turn(build_initial_user_message(question, df))]
         total_usage: dict = {"prompt_tokens": 0, "candidate_tokens": 0, "total_tokens": 0}
+
+        # Self-correction state.
+        consecutive_failures = 0     # resets on any successful execution
+        prev_failed = False          # was the previous run_python a failure?
+        failed_codes: set[str] = set()  # exact code strings that already failed
 
         def emit(step: Step) -> None:
             run.steps.append(step)
@@ -89,13 +101,31 @@ class Orchestrator:
                 result = self.sandbox.run(code)
                 logger.debug("step %d run_python -> %s", step_index, result.short_summary())
 
-                history.append(tool_result_turn("run_python", observation_payload(result)))
+                repeated = code.strip() in failed_codes
+                history.append(
+                    tool_result_turn("run_python", observation_payload(result, repeated=repeated))
+                )
                 emit(Step(index=step_index, action="run_python", thought=response.text,
-                          code=code, observation=result))
+                          code=code, observation=result, is_correction=prev_failed))
                 if result.figure_path:
                     run.figure_path = result.figure_path
                 if result.dataframe_preview:
                     run.final_table_md = result.dataframe_preview
+
+                # Track the repair budget: reset on success, count consecutive
+                # failures, and give up (gracefully) before burning every step.
+                if result.ok:
+                    consecutive_failures = 0
+                    prev_failed = False
+                else:
+                    consecutive_failures += 1
+                    prev_failed = True
+                    failed_codes.add(code.strip())
+                    if consecutive_failures >= self.max_consecutive_failures:
+                        logger.info("giving up after %d consecutive failures", consecutive_failures)
+                        run.status = "failed"
+                        run.final_answer = _failure_answer(run)
+                        break
                 continue
 
             # Unknown tool — tell the model and let it recover.
@@ -121,6 +151,13 @@ def _accumulate_usage(total: dict, usage: dict | None) -> None:
     total["total_tokens"] += usage.get("total_tokens", 0)
 
 
+def _last_error(run: AgentRun):
+    for step in reversed(run.steps):
+        if step.observation is not None and not step.observation.ok:
+            return step.observation
+    return None
+
+
 def _best_effort_answer(run: AgentRun) -> str:
     """A graceful fallback when the step cap is hit before a final answer."""
     for step in reversed(run.steps):
@@ -129,4 +166,21 @@ def _best_effort_answer(run: AgentRun) -> str:
                 "I reached the step limit before finishing. Based on the last "
                 f"successful result: {step.observation.short_summary()}"
             )
+    last = _last_error(run)
+    if last is not None:
+        return (
+            "I reached the step limit without a grounded result. The last error "
+            f"was: {last.short_summary()}."
+        )
     return "I reached the step limit without producing a grounded result."
+
+
+def _failure_answer(run: AgentRun) -> str:
+    """Graceful message when we stop after repeated consecutive failures."""
+    last = _last_error(run)
+    detail = last.short_summary() if last is not None else "an execution error"
+    return (
+        "I couldn't compute a reliable answer — my code kept failing, so I stopped "
+        f"instead of looping. The last error was: {detail}. Try rephrasing the "
+        "question or checking the column names in the data."
+    )

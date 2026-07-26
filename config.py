@@ -36,6 +36,9 @@ class Settings(BaseSettings):
 
     # Agent loop
     max_steps: int = 6
+    # Repair budget: give up after this many *consecutive* failed executions
+    # (resets on any success). Stops a broken question from burning every step.
+    max_consecutive_failures: int = 3
 
     # Sandbox
     sandbox_timeout_s: int = 15
