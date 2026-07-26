@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 import time
 from pathlib import Path
 
@@ -63,6 +64,13 @@ def main() -> None:
     parser.add_argument("--model", default=None, help="Override the Gemini model ID.")
     parser.add_argument("--verbose", action="store_true", help="Enable info logging.")
     args = parser.parse_args()
+
+    # Model answers / tracebacks can contain non-ASCII (arrows, emoji); the
+    # Windows console defaults to cp1252 and would raise UnicodeEncodeError.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
     if args.verbose:
         logging.basicConfig(level=logging.INFO, format="%(message)s")

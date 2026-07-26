@@ -44,7 +44,9 @@ class Sandbox:
         stdout_char_cap: int = 8000,
         python_executable: str | None = None,
     ) -> None:
-        self.work_dir = Path(work_dir)
+        # Resolve to absolute: we set the worker's cwd to work_dir, so relative
+        # --data/--code/--out paths would otherwise be interpreted twice.
+        self.work_dir = Path(work_dir).resolve()
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.timeout_s = timeout_s
         self.stdout_char_cap = stdout_char_cap

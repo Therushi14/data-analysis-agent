@@ -5,8 +5,11 @@ hand-rolled in the orchestrator and deliberately do NOT enable the SDK's
 automatic function calling or Gemini's server-side code_execution tool: the
 model's code must run in *our* sandbox (see plan.md §2, §7).
 
-NOTE: Gemini model IDs rotate. `gemini-2.5-pro` / `gemini-2.5-flash` are the
-defaults; verify against current Google AI docs if a model 404s.
+NOTE: Gemini model IDs rotate, and access depends on your billing tier. Pro
+models require paid quota; the latest Flash (e.g. `gemini-3.6-flash`) works on
+the free tier. Gemini 3.x requires echoing the model's thought_signature back on
+function-call turns (handled in to_contents). Verify IDs against Google AI docs
+if a model 404s or 429s.
 """
 
 from __future__ import annotations
@@ -65,13 +68,16 @@ def to_contents(history: list[dict[str, Any]]) -> list[types.Content]:
                 parts.append(types.Part(text=turn["text"]))
             call = turn.get("tool_call")
             if call:
-                parts.append(
-                    types.Part(
-                        function_call=types.FunctionCall(
-                            name=call["name"], args=call["args"]
-                        )
+                part_kwargs: dict[str, Any] = {
+                    "function_call": types.FunctionCall(
+                        name=call["name"], args=call["args"]
                     )
-                )
+                }
+                # Gemini 3.x requires the model's thought_signature to be echoed
+                # back on the functionCall part, or the next turn 400s.
+                if call.get("signature") is not None:
+                    part_kwargs["thought_signature"] = call["signature"]
+                parts.append(types.Part(**part_kwargs))
             contents.append(types.Content(role="model", parts=parts))
         elif role == "tool":
             contents.append(
@@ -104,7 +110,8 @@ def parse_response(response: Any) -> LLMResponse:
             fc = getattr(part, "function_call", None)
             if fc is not None and tool_call is None:
                 args = dict(fc.args) if getattr(fc, "args", None) else {}
-                tool_call = LLMToolCall(name=fc.name, args=args)
+                signature = getattr(part, "thought_signature", None)
+                tool_call = LLMToolCall(name=fc.name, args=args, signature=signature)
 
     usage = _usage(response)
     text = "\n".join(text_parts) if text_parts else None
@@ -128,7 +135,7 @@ class GeminiClient:
     def __init__(
         self,
         api_key: str | None,
-        model: str = "gemini-2.5-pro",
+        model: str = "gemini-3.6-flash",
         temperature: float = 0.1,
     ) -> None:
         if not api_key:

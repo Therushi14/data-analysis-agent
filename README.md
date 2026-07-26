@@ -61,6 +61,12 @@ python main.py -d path/to/data.csv -q "What is the total revenue?"
 The CLI prints the full reasoning trace (each step's code + observation), then
 the final answer. Add `--verbose` for step logging.
 
+**Model note.** The default is `gemini-3.6-flash` — the latest Flash, which works
+on a free-tier key. Gemini **Pro** models require paid quota (they 429 on free
+tier), and older `gemini-2.5-*` IDs may 404 for new keys. The adapter handles
+Gemini 3.x thought-signatures, so 3.x models work out of the box. Change the
+model via `GEMINI_MODEL` in `.env`.
+
 ## Safety (the guardrails story)
 
 Model-written Python never runs in the app process. `agent/tools/sandbox.py`

@@ -39,7 +39,7 @@ The single most important engineering idea here: **we define the contracts betwe
 |---|---|---|
 | Language | Python 3.11+ | Ecosystem for pandas/matplotlib; the sandbox worker is also Python. |
 | LLM | Gemini via `google-genai` SDK | User-provided Gemini API key. `google-genai` is Google's current unified SDK (`from google import genai`). |
-| Default model | `gemini-2.5-pro` (configurable) | Strongest code-gen/reasoning for writing correct pandas. `gemini-2.5-flash` as the cheaper/faster fallback via config. **Pin exact model IDs against current Google AI Studio docs at build time — Gemini model versions rotate.** |
+| Default model | `gemini-3.6-flash` (configurable) | Verified against the actual key: Pro tiers (`gemini-2.5/3/3.1-pro`) require paid quota (429 on free tier) and `gemini-2.5-flash` 404s for new keys, so the default is the latest Flash. Gemini 3.x needs thought-signature round-tripping (implemented). **Model IDs rotate — re-check against Google AI Studio.** |
 | Tool-calling style | Native **function calling**, loop hand-rolled | We own the loop (pedagogy + control), but use structured function calls (`run_python`) instead of regex-parsing markers. Robust and defensible. |
 | Code execution | **Our** subprocess sandbox, NOT Gemini code-execution tool | The sandbox + self-correction + guardrails are the project's centerpiece and its safety story. Delegating to Google's server-side executor removes all three. |
 | Data | pandas + optional SQLite | Standard, expected, universally understood. |
@@ -380,7 +380,7 @@ Mapped to the design doc's five levels. Each milestone lists tasks and **accepta
 | Setting | Default | Notes |
 |---|---|---|
 | `gemini_api_key` | — (required) | `GEMINI_API_KEY`; never committed. |
-| `model` | `gemini-2.5-pro` | Override to `gemini-2.5-flash` for cost/speed. |
+| `gemini_model` | `gemini-3.6-flash` | Latest Flash (free-tier accessible). Override to a Pro model if you have paid quota. |
 | `max_steps` | `6` | Loop cap (design doc suggests 5–8). |
 | `sandbox_timeout_s` | `15` | Kill runaway code. |
 | `temperature` | `0.1` | Low for reproducible code/evals. |
@@ -408,7 +408,7 @@ Mapped to the design doc's five levels. Each milestone lists tasks and **accepta
 | Flaky evals from model nondeterminism | Med | Low temperature; tolerance/contains checkers; keep an exact-match core set. |
 | Big dataframes blow up latency/tokens | Low-Med | Schema-only in prompt (never the full frame); previews capped; parquet on disk, not in context. |
 | Windows-specific subprocess quirks | Low | Use `subprocess.run` with explicit `timeout`; avoid POSIX-only signals; test on Windows early. |
-| Token/quota cost during dev + evals | Low | `gemini-2.5-flash` for iteration; cache schema; cap steps. |
+| Token/quota cost during dev + evals | Low | Latest Flash for iteration; cache schema; cap steps. Free-tier RPM limits can 429 under bursty runs — space out or add backoff. |
 
 ---
 

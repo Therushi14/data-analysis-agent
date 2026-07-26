@@ -21,8 +21,9 @@ class Settings(BaseSettings):
     # Secrets
     gemini_api_key: str | None = None
 
-    # LLM
-    gemini_model: str = "gemini-2.5-pro"
+    # LLM. Default to the latest Flash: Pro tiers require paid quota, and older
+    # 2.5 models 404 for newly-created keys. Override GEMINI_MODEL in .env.
+    gemini_model: str = "gemini-3.6-flash"
     temperature: float = 0.1
 
     # Agent loop

@@ -22,6 +22,8 @@ from typing import Any, Protocol
 class LLMToolCall:
     name: str  # "run_python" | "final_answer"
     args: dict[str, Any]
+    signature: Any = None  # opaque provider continuation token (e.g. Gemini 3
+    # thought_signature); round-tripped verbatim so multi-turn tool calls stay valid.
 
 
 @dataclass
@@ -95,7 +97,11 @@ def model_tool_call_turn(tool_call: LLMToolCall, text: str | None = None) -> dic
     return {
         "role": "model",
         "text": text,
-        "tool_call": {"name": tool_call.name, "args": tool_call.args},
+        "tool_call": {
+            "name": tool_call.name,
+            "args": tool_call.args,
+            "signature": tool_call.signature,
+        },
     }
 
 

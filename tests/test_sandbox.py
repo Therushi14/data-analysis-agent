@@ -82,3 +82,15 @@ def test_figure_capture(tmp_path, df):
     assert r.ok
     assert r.figure_path is not None
     assert Path(r.figure_path).exists()
+
+
+def test_relative_work_dir_is_resolved(tmp_path, df, monkeypatch):
+    # A relative work_dir must still work: the worker's cwd is the work_dir, so
+    # unresolved relative --data/--code/--out paths would double-nest and 404.
+    monkeypatch.chdir(tmp_path)
+    sb = Sandbox(work_dir="relwork")
+    assert sb.work_dir.is_absolute()
+    sb.prepare_data(df)
+    r = sb.run("result = int(df['x'].sum())")
+    assert r.ok
+    assert "10" in (r.result_repr or "")
