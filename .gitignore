@@ -1,0 +1,29 @@
+# Secrets
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Runtime artifacts (sandbox workdirs, figures, temp data)
+artifacts/
+evals/reports/
+
+# OS
+.DS_Store
+Thumbs.db
