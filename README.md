@@ -9,11 +9,12 @@ The thing that makes this an *agent* (not a single LLM call) is the loop:
 max-iteration guard. The LLM is **Google Gemini** (via `google-genai`), behind a
 provider-agnostic interface so it can be swapped.
 
-> Status: **Levels 1–4 + a custom web UI** implemented — the reason → act →
+> Status: **Levels 1–5 + a custom web UI** implemented — the reason → act →
 > observe → self-correct loop runs end to end, with up-front **planning** for
 > multi-part questions, a repair budget, **session memory** for follow-up
-> questions, and a hand-built FastAPI web app that streams the reasoning trace
-> live. See [plan.md](plan.md) for the full roadmap (deploy, evals).
+> questions, a hand-built FastAPI web app that streams the reasoning trace live,
+> and an **offline eval harness** that scores accuracy against verified ground
+> truth. See [plan.md](plan.md) for the full roadmap (deploy remains).
 
 ---
 
@@ -176,15 +177,51 @@ This is defense-in-depth, not a jail. A real container sandbox (`--network
 none`, read-only rootfs, cgroups, non-root) is the documented hardening path in
 [plan.md §7](plan.md).
 
+## Evaluation (does it actually work?)
+
+Most "chat with your data" demos never prove they're right. This one ships an
+**offline eval harness** ([evals/](evals/)) that scores the agent against **20
+tiered questions** with **verified ground-truth answers**, computed from a
+deliberately messy dataset (`evals/sales_data.csv` — dirty region casing, missing
+segments, and *no* pre-computed revenue/profit, so the agent has to clean and
+derive). Easy questions check the basic loop; medium ones check grouping and the
+region-cleaning; the hard ones (biggest MoM drop, fastest-growing region) are
+genuine multi-step reasoning — where planning and self-correction earn their keep.
+
+```bash
+# Prove the harness end to end without spending any quota:
+python -m evals.run_evals --mock
+
+# Run for real, a slice at a time (free tier ≈ 20 requests/day):
+python -m evals.run_evals --difficulty easy
+python -m evals.run_evals --ids q11,q12,q13
+
+# Score whatever has accumulated and (re)write evals/report.md:
+python -m evals.run_evals --report-only
+```
+
+- **Quota-aware by design.** Each answered question is cached the moment it
+  completes, so a run interrupted by the daily limit just resumes later — you
+  build up to 20/20 across a few days, and the report always scores what's cached.
+- **Deterministic checkers** ([evals/checkers.py](evals/checkers.py)) compare the
+  agent's prose to ground truth — numbers within a tolerance (handling `$`,
+  commas, `%`, month names), categorical by exact word, dict by every value
+  present — so scoring itself spends **no** quota.
+- **Before/after story.** Keep two cached runs side by side with `--tag baseline`
+  vs `--tag improved` and quote the delta. The generated `evals/report.md` is the
+  scorecard (overall %, by-difficulty, tokens, and how many answers self-corrected).
+
 ## Tests
 
 ```bash
-pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adapter translation
+pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adapter translation + evals
 ```
 
 - `test_sandbox.py` — success / dataframe / error traceback / blocked import / timeout / figure.
 - `test_orchestrator.py` — happy path, self-correction (error fed back), step cap, plain-text answer, planning (plan → execute → answer, plan fed back, unplanned path unchanged).
 - `test_gemini_adapter.py` — history↔Gemini translation, response parsing, and array-param (plan) schema mapping (no network).
+- `test_memory.py` / `test_web.py` — session memory + the FastAPI layer (mocked agent).
+- `test_evals.py` — the eval checkers, question selection, and a mock end-to-end run (no quota).
 
 ## Roadmap
 
@@ -194,7 +231,7 @@ pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adap
 | 2 | Self-correction: repair budget, repeat-guard, correction tagging | ✅ implemented |
 | 3 | Planning / multi-step decomposition + charts | ✅ implemented |
 | 4 | Web UI (custom FastAPI + Streamlit) · session memory · deploy | UI ✅; memory ✅; deploy planned |
-| 5 | Eval harness + before/after accuracy | planned |
+| 5 | Eval harness (verified ground truth, quota-aware, scorecard) | ✅ implemented |
 
 See [plan.md](plan.md) for the full plan, interface contracts, and milestone
 acceptance criteria.

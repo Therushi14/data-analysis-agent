@@ -348,10 +348,11 @@ Mapped to the design doc's five levels. Each milestone lists tasks and **accepta
 - **Deploy** — still to do (Streamlit Community Cloud or a host for the FastAPI app; secrets = `GEMINI_API_KEY`). Note: a public URL spends the free-tier daily quota.
 - **Acceptance:** uploading a CSV and asking a question shows the streamed trace, self-correction, and a rendered chart/table; a **follow-up question uses prior context** (covered by `test_memory.py` + `test_orchestrator.py::test_run_seeds_prior_conversation_into_first_message` + `test_web.py::test_memory_persists_and_seeds_followups`). Live URL is the remaining open item.
 
-### M5 — Evals (Design doc Level 5 — standout)
-- Build `evals/` (dataset, ~20 questions, checkers, runner, report).
-- Produce a baseline score, make one measured improvement, record the before/after.
-- **Acceptance:** `python -m evals.run_evals` prints an accuracy % and writes a report; README quotes the number and the improvement story.
+### M5 — Evals (Design doc Level 5 — standout) ✅ harness implemented
+- **Built `evals/`:** a verified dataset (`sales_data.csv` + `answer_key.md`), **20 tiered questions** (`eval_questions.py`, spot-checked against the CSV with pandas), deterministic **checkers** (`checkers.py` — numeric-with-tolerance handling `$`/commas/`%`/month-names, categorical word-match, dict all-values), a per-question **cache** (`cache.py`), a markdown **report** (`report.py`), and a runner CLI (`run_evals.py`).
+- **Quota-aware:** results cache the instant they complete; a run interrupted by the free-tier daily limit resumes later, and `--report-only` scores whatever has accumulated. Selection via `--ids` / `--difficulty` / `--limit`; `--mock` proves the pipeline end-to-end with zero API spend (verified 20/20 on ground-truth answers).
+- **Before/after ready:** `--tag baseline` vs `--tag improved` keep two cached runs side by side to quote the delta. *Open item:* run the live baseline over a few days and record the measured accuracy + one improvement in the README.
+- **Acceptance:** `python -m evals.run_evals` writes `evals/report.md` with an overall %, by-difficulty breakdown, and cost/behavior stats; checkers + a mock end-to-end run are covered by `tests/test_evals.py`. Live accuracy number pending real runs.
 
 ---
 

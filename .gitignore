@@ -23,6 +23,9 @@ env/
 # Runtime artifacts (sandbox workdirs, figures, temp data)
 artifacts/
 evals/reports/
+# Cached eval answers (quota accumulator) and the generated scorecard
+evals/.cache/
+evals/report.md
 
 # OS
 .DS_Store
