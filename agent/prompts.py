@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import pandas as pd
 
+from agent.memory import SessionMemory
 from agent.types import ExecutionResult
+
+CONTEXT_ANSWER_CAP = 400  # truncate remembered answers so context stays compact
 
 SYSTEM_PROMPT = """\
 You are a meticulous data analyst. You answer questions about a dataset by
@@ -54,12 +57,41 @@ def describe_dataframe(df: pd.DataFrame, sample_rows: int = 5) -> str:
     return "\n".join(lines)
 
 
-def build_initial_user_message(question: str, df: pd.DataFrame) -> str:
-    return (
-        f"Question: {question}\n\n"
-        f"Here is the dataset you are working with (available as `df`):\n"
+def conversation_context(memory: SessionMemory | None) -> str | None:
+    """Render prior turns into a compact block for a follow-up question.
+
+    Returns None when there is nothing to remember.
+    """
+    if not memory:
+        return None
+    lines = ["Earlier in this session (oldest first):"]
+    for i, turn in enumerate(memory.recent(), 1):
+        answer = " ".join((turn.answer or "").split())
+        if len(answer) > CONTEXT_ANSWER_CAP:
+            answer = answer[:CONTEXT_ANSWER_CAP].rstrip() + "…"
+        lines.append(f"  Q{i}: {turn.question}")
+        lines.append(f"  A{i}: {answer or '(no answer)'}")
+    return "\n".join(lines)
+
+
+def build_initial_user_message(
+    question: str, df: pd.DataFrame, memory: SessionMemory | None = None
+) -> str:
+    parts: list[str] = []
+    context = conversation_context(memory)
+    if context:
+        parts.append(context)
+        parts.append(
+            'The user is now asking a follow-up. Use the earlier context to resolve '
+            'references ("that", "it", "the same but for …"). If the new question is '
+            "unrelated, ignore the earlier context. Recompute from `df` as needed."
+        )
+    parts.append(f"Question: {question}")
+    parts.append(
+        "Here is the dataset you are working with (available as `df`):\n"
         f"{describe_dataframe(df)}"
     )
+    return "\n\n".join(parts)
 
 
 def plan_ack_payload(plan: list[str]) -> dict:

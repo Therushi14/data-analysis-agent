@@ -342,11 +342,11 @@ Mapped to the design doc's five levels. Each milestone lists tasks and **accepta
 - **Acceptance:** covered by `test_orchestrator.py` (plan → execute → answer; plan fed back into history; messy plan cleaned; unplanned simple path unchanged) and `test_gemini_adapter.py` (array-of-strings param maps to a Gemini ARRAY schema). "plot X and flag the biggest drop" yields a chart + a correct textual flag across ≥2 steps.
 
 ### M4 — Seniority signals: UI + memory + guardrails polish (Design doc Level 4)
-- `app.py`: dataset upload, question box, **streamed reasoning trace** (each `Step` rendered), final answer + table/chart via `render.py`.
-- `SessionMemory` wired for follow-ups; `SchemaCache` on upload.
-- Sandbox hardening: import allow-list enforced + tests; env scrub; artifact isolation per session.
-- Deploy to Streamlit Community Cloud (secrets = `GEMINI_API_KEY`).
-- **Acceptance:** live URL works; uploading a CSV and asking a question shows the trace, self-correction, and a rendered chart/table; a follow-up question uses prior context.
+- **UI ✅** — Two front-ends over the same Orchestrator: a hand-built **FastAPI web app** (`web/`) that streams the reasoning trace as NDJSON with inline charts, and a **Streamlit** app (`app.py`). Both render each `Step` live.
+- **Session memory ✅** — `agent/memory.py` (`SessionMemory`/`Turn`) carries prior question→answer turns into the next question's context via `build_initial_user_message(..., memory)`, so follow-ups ("plot that", "just the BMWs") resolve. Surfaced as a multi-turn conversation thread in the web app (with a *New conversation* reset + `/api/reset`), a "🗑 New conversation" button in Streamlit, and an interactive `python main.py --chat` in the CLI. Memory is conversational, not computational (the sandbox is stateless per run); persisting the kernel namespace is a documented future step. `SchemaCache` deferred (not needed yet).
+- Sandbox hardening: import deny-list enforced + tests; env scrub; per-session artifact isolation. (Container isolation remains the documented hardening path, §7.)
+- **Deploy** — still to do (Streamlit Community Cloud or a host for the FastAPI app; secrets = `GEMINI_API_KEY`). Note: a public URL spends the free-tier daily quota.
+- **Acceptance:** uploading a CSV and asking a question shows the streamed trace, self-correction, and a rendered chart/table; a **follow-up question uses prior context** (covered by `test_memory.py` + `test_orchestrator.py::test_run_seeds_prior_conversation_into_first_message` + `test_web.py::test_memory_persists_and_seeds_followups`). Live URL is the remaining open item.
 
 ### M5 — Evals (Design doc Level 5 — standout)
 - Build `evals/` (dataset, ~20 questions, checkers, runner, report).

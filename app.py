@@ -16,7 +16,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from agent.orchestrator import Orchestrator
+from agent.memory import SessionMemory
+from agent.orchestrator import Orchestrator, result_summary
 from agent.tools.sandbox import Sandbox
 from agent.types import Step
 from config import get_settings
@@ -114,6 +115,11 @@ def main() -> None:
         )
         max_steps = st.slider("Max steps", 1, 12, settings.max_steps)
 
+        if st.button("🗑 New conversation", help="Forget prior questions in this session"):
+            st.session_state["history"] = []
+            st.session_state["memory"] = SessionMemory()
+            st.rerun()
+
         if keys:
             st.success(
                 f"{len(keys)} API key(s) loaded" + (" · failover on" if len(keys) > 1 else "")
@@ -141,6 +147,13 @@ def main() -> None:
         st.info("⬅️ Upload a CSV or tick **Use bundled sample** in the sidebar to begin.")
         return
 
+    # Session memory for follow-up questions. Switching datasets starts fresh.
+    if source and st.session_state.get("_source") not in (None, source):
+        st.session_state["history"] = []
+        st.session_state["memory"] = SessionMemory()
+    st.session_state["_source"] = source
+    memory = st.session_state.setdefault("memory", SessionMemory())
+
     with st.expander(f"📄 Dataset preview — {source} · {len(df)} rows × {len(df.columns)} cols"):
         st.dataframe(df.head(20), use_container_width=True)
 
@@ -155,6 +168,11 @@ def main() -> None:
                     st.image(item["figure"])
 
     st.subheader("Ask a question")
+    if memory:
+        st.caption(
+            f"🧠 Remembering {len(memory)} previous question(s) — ask a follow-up "
+            "like “now just for the BMWs” or “plot that”."
+        )
     question = st.text_area(
         "Question",
         placeholder="e.g. Which region grew fastest from January to April by revenue? Plot it.",
@@ -197,7 +215,7 @@ def main() -> None:
 
     with st.spinner(f"Running on {model} …"):
         try:
-            run = orchestrator.run(question.strip(), df, on_step=on_step)
+            run = orchestrator.run(question.strip(), df, on_step=on_step, memory=memory)
         except genai_errors.APIError as e:
             msg = str(e)
             if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
@@ -233,6 +251,7 @@ def main() -> None:
         f"tokens: {run.usage.get('total_tokens', '?')} · model: {model}"
     )
 
+    memory.add(question.strip(), run.final_answer, result_summary(run))
     history.append(
         {
             "question": question.strip(),

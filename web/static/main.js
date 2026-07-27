@@ -1,7 +1,7 @@
 "use strict";
 
 // --- State ---
-const state = { datasetId: null, hasKeys: false, running: false };
+const state = { datasetId: null, hasKeys: false, running: false, turns: 0, memoryTurns: 0 };
 
 // --- Elements ---
 const $ = (id) => document.getElementById(id);
@@ -16,8 +16,10 @@ const questionEl = $("question");
 const askBtn = $("ask-btn");
 const askNote = $("ask-note");
 const emptyState = $("empty-state");
-const traceEl = $("trace");
-const answerEl = $("answer");
+const conversationEl = $("conversation");
+const convoHead = $("convo-head");
+const convoCount = $("convo-count");
+const newConvoBtn = $("new-convo");
 
 // --- Init ---
 init();
@@ -68,6 +70,7 @@ function bindEvents() {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !askBtn.disabled) ask();
   });
   askBtn.addEventListener("click", ask);
+  newConvoBtn.addEventListener("click", newConversation);
 }
 
 function refreshAsk() {
@@ -76,7 +79,14 @@ function refreshAsk() {
   if (!state.hasKeys) askNote.textContent = "Add GEMINI_API_KEY to .env to enable.";
   else if (!state.datasetId) askNote.textContent = "Load a dataset first.";
   else if (state.running) askNote.textContent = "Working…";
+  else if (state.memoryTurns > 0) askNote.textContent = "Follow-up? ⌘/Ctrl + Enter";
   else askNote.textContent = "⌘/Ctrl + Enter to ask";
+}
+
+function updateConvoCount() {
+  const q = state.turns === 1 ? "question" : "questions";
+  const mem = state.memoryTurns > 0 ? ` · remembers ${state.memoryTurns}` : "";
+  convoCount.textContent = `${state.turns} ${q}${mem}`;
 }
 
 // --- Dataset ---
@@ -110,6 +120,8 @@ function onDataset(meta) {
     .join("");
   renderPreviewTable(meta.preview);
   datasetInfo.classList.remove("hidden");
+  // A new dataset starts a fresh conversation.
+  resetConversationView();
   refreshAsk();
 }
 
@@ -121,18 +133,67 @@ function renderPreviewTable(preview) {
   $("ds-preview").innerHTML = thead + rows;
 }
 
-// --- Ask (streaming) ---
+// --- Conversation control ---
+function resetConversationView() {
+  conversationEl.innerHTML = "";
+  state.turns = 0;
+  state.memoryTurns = 0;
+  convoHead.classList.add("hidden");
+  emptyState.classList.remove("hidden");
+  refreshAsk();
+}
+
+async function newConversation() {
+  if (state.datasetId) {
+    try {
+      await fetch("/api/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataset_id: state.datasetId }),
+      });
+    } catch { /* best effort */ }
+  }
+  resetConversationView();
+}
+
+function createTurn(question, isFollowup) {
+  const turn = document.createElement("article");
+  turn.className = "turn";
+  const fu = isFollowup ? `<span class="pill turn-followup">↳ follow-up</span>` : "";
+  turn.innerHTML = `
+    <div class="turn-q">
+      <span class="turn-label">You asked</span>${fu}
+      <span class="q-text">${escapeHtml(question)}</span>
+    </div>
+    <div class="trace turn-trace"></div>
+    <div class="turn-answer"></div>`;
+  conversationEl.appendChild(turn);
+  return {
+    trace: turn.querySelector(".turn-trace"),
+    answer: turn.querySelector(".turn-answer"),
+    el: turn,
+  };
+}
+
+// --- Ask (streaming, multi-turn) ---
 async function ask() {
   const question = questionEl.value.trim();
-  if (!question || !state.datasetId) return;
+  if (!question || !state.datasetId || state.running) return;
 
   state.running = true;
-  refreshAsk();
   emptyState.classList.add("hidden");
-  answerEl.classList.add("hidden");
-  answerEl.innerHTML = "";
-  traceEl.innerHTML = "";
-  const thinking = addThinking();
+  convoHead.classList.remove("hidden");
+  _lastFigure = null;
+
+  const isFollowup = state.memoryTurns > 0;
+  const ctx = createTurn(question, isFollowup);
+  state.turns += 1;
+  updateConvoCount();
+  questionEl.value = "";
+  refreshAsk();
+
+  const thinking = addThinking(ctx.trace);
+  ctx.el.scrollIntoView({ behavior: "smooth", block: "start" });
 
   try {
     const res = await fetch("/api/ask", {
@@ -148,20 +209,20 @@ async function ask() {
     if (!res.ok) {
       const detail = await res.json().then((d) => d.detail).catch(() => res.statusText);
       thinking.remove();
-      showRunError({ message: detail });
+      showRunError(ctx.answer, { message: detail });
       return;
     }
-    await readStream(res, thinking);
+    await readStream(res, thinking, ctx);
   } catch (err) {
     thinking.remove();
-    showRunError({ message: err.message || "Network error." });
+    showRunError(ctx.answer, { message: err.message || "Network error." });
   } finally {
     state.running = false;
     refreshAsk();
   }
 }
 
-async function readStream(res, thinking) {
+async function readStream(res, thinking, ctx) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -173,30 +234,33 @@ async function readStream(res, thinking) {
     while ((nl = buffer.indexOf("\n")) >= 0) {
       const line = buffer.slice(0, nl).trim();
       buffer = buffer.slice(nl + 1);
-      if (line) handleEvent(JSON.parse(line), thinking);
+      if (line) handleEvent(JSON.parse(line), thinking, ctx);
     }
   }
 }
 
-function handleEvent(evt, thinking) {
+function handleEvent(evt, thinking, ctx) {
   if (evt.type === "step") {
-    traceEl.insertBefore(renderStep(evt.data), thinking);
+    ctx.trace.insertBefore(renderStep(evt.data), thinking);
     thinking.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } else if (evt.type === "done") {
     thinking.remove();
-    renderAnswer(evt.data);
+    if (typeof evt.data.memory_turns === "number") state.memoryTurns = evt.data.memory_turns;
+    renderAnswerInto(ctx.answer, evt.data);
+    updateConvoCount();
+    refreshAsk();
   } else if (evt.type === "error") {
     thinking.remove();
-    showRunError(evt.data);
+    showRunError(ctx.answer, evt.data);
   }
 }
 
 // --- Rendering ---
-function addThinking() {
+function addThinking(container) {
   const el = document.createElement("div");
   el.className = "thinking";
   el.innerHTML = `<span class="dots"><span></span><span></span><span></span></span> The agent is thinking…`;
-  traceEl.appendChild(el);
+  container.appendChild(el);
   return el;
 }
 
@@ -227,8 +291,7 @@ function renderStep(s) {
 
   if (s.code) parts.push(`<pre class="code">${highlightPy(s.code)}</pre>`);
 
-  const obs = s.observation;
-  if (obs) parts.push(renderObservation(obs));
+  if (s.observation) parts.push(renderObservation(s.observation));
 
   if (s.final_answer && s.action === "final_answer") {
     parts.push(`<div class="answer-text">${mdInline(s.final_answer)}</div>`);
@@ -259,7 +322,7 @@ function renderObservation(obs) {
   return blocks.join("") || `<div class="meta-line">ran with no explicit result</div>`;
 }
 
-function renderAnswer(run) {
+function renderAnswerInto(el, run) {
   const status = {
     answered: ["pill-ok", "Answered"],
     cap_reached: ["pill-warn", "Step limit reached"],
@@ -280,25 +343,25 @@ function renderAnswer(run) {
     ? `<img class="chart" src="${run.figure}" alt="final chart" />` : "";
 
   const tokens = (run.usage && run.usage.total_tokens) || "?";
-  answerEl.innerHTML = `
-    <div class="answer-head">
-      <h2>Answer</h2>
-      <span class="pill ${status[0]}">${escapeHtml(status[1])}</span>
-      ${planPill}
-    </div>
-    <div class="answer-body">
-      <div class="answer-text">${mdInline(run.final_answer || "No answer produced.")}</div>
-      ${chart}
-      ${note}
-      <div class="answer-meta">
-        <span>steps: ${run.n_steps}</span>
-        <span>errors: ${run.n_errors}</span>
-        <span>tokens: ${escapeHtml(String(tokens))}</span>
-        <span>model: ${escapeHtml(modelSelect.value)}</span>
+  el.innerHTML = `
+    <div class="answer card">
+      <div class="answer-head">
+        <h2>Answer</h2>
+        <span class="pill ${status[0]}">${escapeHtml(status[1])}</span>
+        ${planPill}
+      </div>
+      <div class="answer-body">
+        <div class="answer-text">${mdInline(run.final_answer || "No answer produced.")}</div>
+        ${chart}
+        ${note}
+        <div class="answer-meta">
+          <span>steps: ${run.n_steps}</span>
+          <span>errors: ${run.n_errors}</span>
+          <span>tokens: ${escapeHtml(String(tokens))}</span>
+          <span>model: ${escapeHtml(modelSelect.value)}</span>
+        </div>
       </div>
     </div>`;
-  answerEl.classList.remove("hidden");
-  answerEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 // Avoid duplicating the final chart when it already appears in the last trace step.
@@ -309,15 +372,16 @@ function traceHasFigure(fig) {
   return dup;
 }
 
-function showRunError(data) {
+function showRunError(el, data) {
   const rate = data.rate_limited;
   const msg = rate
     ? "All configured keys hit the free-tier limit. Wait for the daily reset, switch the model, add a backup key, or enable billing."
     : (data.message || "Something went wrong.");
-  answerEl.innerHTML = `
-    <div class="answer-head"><h2>Answer</h2><span class="pill pill-err">Error</span></div>
-    <div class="answer-body"><div class="note note-err">${escapeHtml(msg)}</div></div>`;
-  answerEl.classList.remove("hidden");
+  el.innerHTML = `
+    <div class="answer card">
+      <div class="answer-head"><h2>Answer</h2><span class="pill pill-err">Error</span></div>
+      <div class="answer-body"><div class="note note-err">${escapeHtml(msg)}</div></div>
+    </div>`;
 }
 
 // --- Helpers ---

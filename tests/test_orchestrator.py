@@ -9,7 +9,8 @@ from __future__ import annotations
 import pandas as pd
 
 from agent.llm.base import LLMResponse, LLMToolCall
-from agent.orchestrator import Orchestrator
+from agent.memory import SessionMemory
+from agent.orchestrator import Orchestrator, result_summary
 from agent.types import ExecutionResult
 
 DF = pd.DataFrame({"x": [1, 2, 3]})
@@ -152,6 +153,38 @@ def test_is_correction_flag_marks_steps_after_an_error():
 
     assert run.steps[0].is_correction is False  # first attempt, nothing to correct
     assert run.steps[1].is_correction is True   # follows a failure
+
+
+# --- Level 4: session memory ----------------------------------------------------
+
+def test_run_seeds_prior_conversation_into_first_message():
+    memory = SessionMemory()
+    memory.add("Which region grew fastest?", "South, at +137%.")
+    llm = FakeLLM([_call("final_answer", {"answer": "Here is the plot."})])
+    Orchestrator(llm, FakeSandbox(), max_steps=6).run("Now plot that.", DF, memory=memory)
+
+    first_user_turn = llm.calls[0][0]
+    assert first_user_turn["role"] == "user"
+    assert "Which region grew fastest?" in first_user_turn["text"]  # follow-up context present
+    assert "Now plot that." in first_user_turn["text"]
+
+
+def test_run_without_memory_has_no_prior_context():
+    llm = FakeLLM([_call("final_answer", {"answer": "42"})])
+    Orchestrator(llm, FakeSandbox(), max_steps=6).run("Total?", DF)
+    assert "Earlier in this session" not in llm.calls[0][0]["text"]
+
+
+def test_result_summary_reports_last_success():
+    run = Orchestrator(
+        FakeLLM([
+            _call("run_python", {"code": "result = df['x'].sum()"}),
+            _call("final_answer", {"answer": "6"}),
+        ]),
+        FakeSandbox([ExecutionResult(ok=True, result_kind="scalar", result_repr="6")]),
+        max_steps=6,
+    ).run("sum?", DF)
+    assert "6" in (result_summary(run) or "")
 
 
 # --- Level 3: planning / multi-step ---------------------------------------------

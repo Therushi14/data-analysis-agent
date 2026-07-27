@@ -68,14 +68,18 @@
         </div>
       </div>
 
+      <div id="convo-head" class="convo-head hidden">
+        <span id="convo-count" class="hint"></span>
+        <button id="new-convo" class="btn btn-ghost btn-sm">New conversation</button>
+      </div>
+
       <div id="empty-state" class="empty-state">
         <div class="empty-icon">◧</div>
         <p>Load a dataset and ask a question to see the agent reason step by step.</p>
+        <p class="hint">Ask follow-ups too — it remembers the conversation.</p>
       </div>
 
-      <div id="answer" class="answer card hidden"></div>
-
-      <div id="trace" class="trace"></div>
+      <div id="conversation" class="conversation"></div>
     </section>
   </main>
 

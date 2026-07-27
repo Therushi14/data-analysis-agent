@@ -85,7 +85,7 @@ def test_ask_unknown_dataset_404():
 # --- Streamed run with a fake orchestrator --------------------------------------
 
 class _FakeOrchestrator:
-    def run(self, question, df, on_step=None):
+    def run(self, question, df, on_step=None, memory=None):
         s1 = Step(index=1, action="plan", plan=["Compute sum"])
         s2 = Step(
             index=2, action="run_python", code="result = df['a'].sum()",
@@ -126,6 +126,51 @@ def test_ask_without_keys_is_400(monkeypatch):
     monkeypatch.setattr(server, "get_settings", lambda: _StubSettings(keys=[]))
     r = client.post("/api/ask", json={"dataset_id": ds_id, "question": "hi"})
     assert r.status_code == 400
+
+
+# --- Session memory across turns ------------------------------------------------
+
+def _drain(ds_id, question):
+    with client.stream("POST", "/api/ask",
+                       json={"dataset_id": ds_id, "question": question}) as r:
+        return [json.loads(line) for line in r.iter_lines() if line.strip()]
+
+
+def test_memory_persists_and_seeds_followups(monkeypatch):
+    seen_lengths = []
+
+    class _Fake:
+        def run(self, question, df, on_step=None, memory=None):
+            seen_lengths.append(len(memory) if memory is not None else -1)
+            return AgentRun(question=question, status="answered", final_answer=f"ans:{question}")
+
+    monkeypatch.setattr(server, "_make_orchestrator", lambda *a, **k: _Fake())
+    monkeypatch.setattr(server, "get_settings", lambda: _StubSettings())
+    ds_id = server._store_dataset(_df(), "t.csv")
+
+    _drain(ds_id, "first?")
+    ev2 = _drain(ds_id, "second?")
+
+    assert seen_lengths == [0, 1]                       # 2nd run saw 1 remembered turn
+    assert len(server._DATASETS[ds_id]["memory"]) == 2  # both turns recorded
+    assert ev2[-1]["data"]["memory_turns"] == 2
+
+
+def test_reset_clears_memory(monkeypatch):
+    class _Fake:
+        def run(self, question, df, on_step=None, memory=None):
+            return AgentRun(question=question, status="answered", final_answer="a")
+
+    monkeypatch.setattr(server, "_make_orchestrator", lambda *a, **k: _Fake())
+    monkeypatch.setattr(server, "get_settings", lambda: _StubSettings())
+    ds_id = server._store_dataset(_df(), "t.csv")
+
+    _drain(ds_id, "q?")
+    assert len(server._DATASETS[ds_id]["memory"]) == 1
+
+    r = client.post("/api/reset", json={"dataset_id": ds_id})
+    assert r.status_code == 200
+    assert len(server._DATASETS[ds_id]["memory"]) == 0
 
 
 # --- Small stubs ----------------------------------------------------------------

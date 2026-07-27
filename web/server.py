@@ -29,7 +29,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agent.orchestrator import Orchestrator
+from agent.memory import SessionMemory
+from agent.orchestrator import Orchestrator, result_summary
 from agent.tools.sandbox import Sandbox
 from agent.types import AgentRun, Step
 from config import get_settings
@@ -61,7 +62,8 @@ _MAX_DATASETS = 24
 
 def _store_dataset(df: pd.DataFrame, name: str) -> str:
     ds_id = uuid.uuid4().hex[:12]
-    _DATASETS[ds_id] = {"df": df, "name": name}
+    # Each dataset session gets its own conversation memory for follow-ups.
+    _DATASETS[ds_id] = {"df": df, "name": name, "memory": SessionMemory()}
     while len(_DATASETS) > _MAX_DATASETS:
         _DATASETS.pop(next(iter(_DATASETS)), None)
     return ds_id
@@ -159,13 +161,21 @@ def _is_rate_limit(msg: str) -> bool:
     return "RESOURCE_EXHAUSTED" in msg or "429" in msg
 
 
-def stream_answer(question: str, df: pd.DataFrame, model: str, max_steps: int, keys: list[str]):
+def stream_answer(
+    question: str,
+    df: pd.DataFrame,
+    model: str,
+    max_steps: int,
+    keys: list[str],
+    memory: SessionMemory | None = None,
+):
     """Yield NDJSON events for a single agent run, streaming steps as they happen.
 
     The orchestrator runs on a worker thread and pushes each Step into a queue;
     this (sync) generator drains the queue so Starlette can stream it to the
     browser. Event shapes: {"type":"step","data":{...}}, {"type":"done",...},
-    {"type":"error",...}.
+    {"type":"error",...}. When ``memory`` is given, prior turns seed the run and
+    this turn is appended once it answers.
     """
     settings = get_settings()
     events: queue.Queue = queue.Queue()
@@ -182,8 +192,12 @@ def stream_answer(question: str, df: pd.DataFrame, model: str, max_steps: int, k
     def worker() -> None:
         try:
             orch = _make_orchestrator(model, max_steps, keys, sandbox)
-            run = orch.run(question, df, on_step=on_step)
-            events.put(("done", serialize_run(run)))
+            run = orch.run(question, df, on_step=on_step, memory=memory)
+            if memory is not None and run.final_answer:
+                memory.add(question, run.final_answer, result_summary(run))
+            payload = serialize_run(run)
+            payload["memory_turns"] = len(memory) if memory is not None else 0
+            events.put(("done", payload))
         except Exception as e:  # noqa: BLE001 — surface any failure to the client
             msg = str(e)
             events.put((
@@ -271,8 +285,24 @@ def ask(req: AskRequest) -> StreamingResponse:
     model = req.model or settings.gemini_model
     max_steps = max(1, min(int(req.max_steps or settings.max_steps), 12))
 
-    gen = stream_answer(question, entry["df"], model, max_steps, keys)
+    gen = stream_answer(question, entry["df"], model, max_steps, keys, entry.get("memory"))
     return StreamingResponse(gen, media_type="application/x-ndjson")
+
+
+class ResetRequest(BaseModel):
+    dataset_id: str
+
+
+@app.post("/api/reset")
+def reset(req: ResetRequest) -> dict[str, Any]:
+    """Clear a session's conversation memory (start a fresh conversation)."""
+    entry = _DATASETS.get(req.dataset_id)
+    if entry is None:
+        raise HTTPException(404, "Dataset not found.")
+    mem = entry.get("memory")
+    if mem is not None:
+        mem.clear()
+    return {"ok": True, "memory_turns": 0}
 
 
 # Static assets (css/js). Mounted last so it can't shadow the API routes above.

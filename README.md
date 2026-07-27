@@ -9,11 +9,11 @@ The thing that makes this an *agent* (not a single LLM call) is the loop:
 max-iteration guard. The LLM is **Google Gemini** (via `google-genai`), behind a
 provider-agnostic interface so it can be swapped.
 
-> Status: **Levels 1–3 + a custom web UI** implemented — the reason → act →
+> Status: **Levels 1–4 + a custom web UI** implemented — the reason → act →
 > observe → self-correct loop runs end to end, with up-front **planning** for
-> multi-part questions, a repair budget, and a hand-built FastAPI web app that
-> streams the reasoning trace live. See [plan.md](plan.md) for the full roadmap
-> (memory, evals).
+> multi-part questions, a repair budget, **session memory** for follow-up
+> questions, and a hand-built FastAPI web app that streams the reasoning trace
+> live. See [plan.md](plan.md) for the full roadmap (deploy, evals).
 
 ---
 
@@ -95,7 +95,9 @@ It lets you:
 - ask a question and watch the **reasoning trace stream live** — the plan, each
   step's syntax-highlighted code, and its result — as newline-delimited JSON;
 - see the final answer with any **chart rendered inline** (embedded as a data URI,
-  so no artifact paths are exposed), plus a status/plan/recovery summary.
+  so no artifact paths are exposed), plus a status/plan/recovery summary;
+- ask **follow-up questions** — the agent remembers the conversation, and a
+  *New conversation* button resets it.
 
 Keys are read from `.env` (`GEMINI_API_KEY` / `GEMINI_API_KEY_BACKUP`); the same
 automatic failover applies.
@@ -141,6 +143,23 @@ distribution") gets fully answered instead of stopping after the first part.
   step, so easy questions cost no extra API call. The step cap is 8 (`MAX_STEPS`),
   leaving a planned run room to finish.
 
+## Session memory (follow-up questions)
+
+Ask a question, then follow up — *"now just the BMWs"*, *"plot that"*, *"the same
+but by month"* — and the agent uses the conversation so far to resolve what you
+mean.
+
+- Each session keeps a bounded list of prior **question → answer** turns
+  (`agent/memory.py`), injected as a compact "earlier in this session" block into
+  the next question's context.
+- The web app shows a **multi-turn conversation thread** (follow-ups are tagged
+  *↳ follow-up*) with a **New conversation** button to start fresh; the terminal
+  has an interactive mode: `python main.py --chat`.
+- Because the sandbox is stateless by design (each `run_python` is a fresh
+  subprocess with only `df`), memory is **conversational, not computational**: the
+  agent recomputes from `df` using the remembered context. Persisting the actual
+  computed variables would need a long-lived kernel — a documented future step.
+
 ## Safety (the guardrails story)
 
 Model-written Python never runs in the app process. `agent/tools/sandbox.py`
@@ -174,7 +193,7 @@ pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adap
 | 1 | Core loop (reason → act → observe → answer) | ✅ implemented |
 | 2 | Self-correction: repair budget, repeat-guard, correction tagging | ✅ implemented |
 | 3 | Planning / multi-step decomposition + charts | ✅ implemented |
-| 4 | Web UI (custom FastAPI app + Streamlit) · session memory · deploy | UI ✅ (custom + Streamlit); memory/deploy planned |
+| 4 | Web UI (custom FastAPI + Streamlit) · session memory · deploy | UI ✅; memory ✅; deploy planned |
 | 5 | Eval harness + before/after accuracy | planned |
 
 See [plan.md](plan.md) for the full plan, interface contracts, and milestone

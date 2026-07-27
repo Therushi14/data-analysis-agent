@@ -25,6 +25,7 @@ from agent.llm.base import (
     tool_result_turn,
     user_turn,
 )
+from agent.memory import SessionMemory
 from agent.prompts import (
     SYSTEM_PROMPT,
     build_initial_user_message,
@@ -55,11 +56,12 @@ class Orchestrator:
         question: str,
         df: pd.DataFrame,
         on_step: Callable[[Step], None] | None = None,
+        memory: SessionMemory | None = None,
     ) -> AgentRun:
         self.sandbox.prepare_data(df)
 
         run = AgentRun(question=question)
-        history = [user_turn(build_initial_user_message(question, df))]
+        history = [user_turn(build_initial_user_message(question, df, memory))]
         total_usage: dict = {"prompt_tokens": 0, "candidate_tokens": 0, "total_tokens": 0}
 
         # Self-correction state.
@@ -178,6 +180,14 @@ def _accumulate_usage(total: dict, usage: dict | None) -> None:
     total["prompt_tokens"] += usage.get("prompt_tokens", 0)
     total["candidate_tokens"] += usage.get("candidate_tokens", 0)
     total["total_tokens"] += usage.get("total_tokens", 0)
+
+
+def result_summary(run: AgentRun) -> str | None:
+    """A one-line note of what the run computed, for session memory."""
+    for step in reversed(run.steps):
+        if step.observation is not None and step.observation.ok:
+            return step.observation.short_summary()
+    return None
 
 
 def _last_error(run: AgentRun):

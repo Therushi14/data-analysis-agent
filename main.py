@@ -17,7 +17,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent.orchestrator import Orchestrator
+from agent.memory import SessionMemory
+from agent.orchestrator import Orchestrator, result_summary
 from agent.tools.sandbox import Sandbox
 from agent.types import AgentRun, Step
 from config import get_settings
@@ -73,11 +74,15 @@ def print_footer(run: AgentRun) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Data-Analysis Agent (CLI)")
-    parser.add_argument("--question", "-q", required=True, help="Question to ask about the data.")
+    parser.add_argument("--question", "-q", help="Question to ask about the data (omit with --chat).")
     parser.add_argument("--data", "-d", default=str(DEFAULT_DATA), help="Path to a CSV file.")
     parser.add_argument("--model", default=None, help="Override the Gemini model ID.")
+    parser.add_argument("--chat", action="store_true",
+                        help="Interactive multi-turn chat with session memory (ask follow-ups).")
     parser.add_argument("--verbose", action="store_true", help="Enable info logging.")
     args = parser.parse_args()
+    if not args.chat and not args.question:
+        parser.error("--question is required unless you use --chat")
 
     # Model answers / tracebacks / logs can contain non-ASCII (arrows, emoji);
     # the Windows console defaults to cp1252 and would raise UnicodeEncodeError.
@@ -127,20 +132,40 @@ def main() -> None:
         f"(model: {model} | keys: {len(settings.api_keys)} | "
         f"max_steps: {settings.max_steps} | timeout: {settings.request_timeout_s}s)"
     )
-    print_header(args.question)
-    try:
-        run = orchestrator.run(args.question, df, on_step=print_step)
-    except genai_errors.APIError as e:
-        msg = str(e)
-        print(f"\n[Gemini API error] {msg[:300]}")
-        if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
-            print(
-                "\n>> All configured keys hit the free-tier limit, not a hang. "
-                "Wait for the daily reset, add another GEMINI_API_KEY_BACKUP, "
-                "switch GEMINI_MODEL to a different flash model, or enable billing."
-            )
-        return
-    print_footer(run)
+
+    def answer(question: str, memory: SessionMemory | None = None) -> AgentRun | None:
+        print_header(question)
+        try:
+            run = orchestrator.run(question, df, on_step=print_step, memory=memory)
+        except genai_errors.APIError as e:
+            msg = str(e)
+            print(f"\n[Gemini API error] {msg[:300]}")
+            if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
+                print(
+                    "\n>> All configured keys hit the free-tier limit, not a hang. "
+                    "Wait for the daily reset, add another GEMINI_API_KEY_BACKUP, "
+                    "switch GEMINI_MODEL to a different flash model, or enable billing."
+                )
+            return None
+        print_footer(run)
+        return run
+
+    if args.chat:
+        memory = SessionMemory()
+        print("\nInteractive chat — ask follow-ups (it remembers). Blank line or 'exit' to quit.")
+        while True:
+            try:
+                question = input("\nyou> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if not question or question.lower() in {"exit", "quit"}:
+                break
+            run = answer(question, memory)
+            if run is not None and run.final_answer:
+                memory.add(question, run.final_answer, result_summary(run))
+    else:
+        answer(args.question)
 
 
 if __name__ == "__main__":
