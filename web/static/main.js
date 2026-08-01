@@ -20,6 +20,8 @@ const conversationEl = $("conversation");
 const convoHead = $("convo-head");
 const convoCount = $("convo-count");
 const newConvoBtn = $("new-convo");
+const suggestionsEl = $("suggestions");
+const suggestChipsEl = $("suggest-chips");
 
 // --- Init ---
 init();
@@ -123,6 +125,43 @@ function onDataset(meta) {
   // A new dataset starts a fresh conversation.
   resetConversationView();
   refreshAsk();
+  loadSuggestions(meta.id);
+}
+
+async function loadSuggestions(datasetId) {
+  if (!state.hasKeys) {
+    suggestionsEl.classList.add("hidden");
+    return;
+  }
+  suggestionsEl.classList.remove("hidden");
+  suggestChipsEl.innerHTML = `<span class="chip-loading">💭 thinking of good questions…</span>`;
+  try {
+    const data = await fetch("/api/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataset_id: datasetId }),
+    }).then((r) => r.json());
+    const questions = (data && data.questions) || [];
+    if (!questions.length) {
+      suggestionsEl.classList.add("hidden");
+      return;
+    }
+    suggestChipsEl.innerHTML = "";
+    questions.forEach((q) => {
+      const chip = document.createElement("button");
+      chip.className = "chip";
+      chip.textContent = q;
+      chip.addEventListener("click", () => {
+        if (state.running) return;
+        questionEl.value = q;
+        refreshAsk();
+        ask();
+      });
+      suggestChipsEl.appendChild(chip);
+    });
+  } catch {
+    suggestionsEl.classList.add("hidden");
+  }
 }
 
 function renderPreviewTable(preview) {

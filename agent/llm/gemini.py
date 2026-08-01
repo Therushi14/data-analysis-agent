@@ -188,11 +188,13 @@ class GeminiClient:
         history: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> LLMResponse:
-        config = types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            temperature=self.temperature,
-            tools=[_build_tool(tools)],
-        )
+        config_kwargs: dict[str, Any] = {
+            "system_instruction": system_prompt,
+            "temperature": self.temperature,
+        }
+        if tools:  # omit for plain text completions (e.g. suggestions)
+            config_kwargs["tools"] = [_build_tool(tools)]
+        config = types.GenerateContentConfig(**config_kwargs)
         contents = to_contents(history)
 
         # Try each key in turn, starting from the one currently in use. On a

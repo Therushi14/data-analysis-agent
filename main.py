@@ -76,13 +76,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Data-Analysis Agent (CLI)")
     parser.add_argument("--question", "-q", help="Question to ask about the data (omit with --chat).")
     parser.add_argument("--data", "-d", default=str(DEFAULT_DATA), help="Path to a CSV file.")
-    parser.add_argument("--model", default=None, help="Override the Gemini model ID.")
+    parser.add_argument("--model", default=None, help="Override the model ID.")
     parser.add_argument("--chat", action="store_true",
                         help="Interactive multi-turn chat with session memory (ask follow-ups).")
+    parser.add_argument("--suggest", action="store_true",
+                        help="Print agent-suggested starter questions for the dataset.")
     parser.add_argument("--verbose", action="store_true", help="Enable info logging.")
     args = parser.parse_args()
-    if not args.chat and not args.question:
-        parser.error("--question is required unless you use --chat")
+    if not (args.chat or args.question or args.suggest):
+        parser.error("--question is required (or use --chat / --suggest)")
 
     # Model answers / tracebacks / logs can contain non-ASCII (arrows, emoji);
     # the Windows console defaults to cp1252 and would raise UnicodeEncodeError.
@@ -143,6 +145,15 @@ def main() -> None:
             return None
         print_footer(run)
         return run
+
+    if args.suggest:
+        from agent.suggest import suggest_questions
+        questions = suggest_questions(df, llm, n=5)
+        print("\nSuggested questions:")
+        for q in questions or ["(none — is a valid API key set?)"]:
+            print(f"  • {q}")
+        if not (args.chat or args.question):
+            return
 
     if args.chat:
         memory = SessionMemory()

@@ -97,6 +97,9 @@ uvicorn web.server:app --reload
 
 It lets you:
 
+- get **agent-suggested questions** the instant a dataset loads — the model reads
+  the schema and proposes tailored questions; click a chip to run one (no more
+  blank page). Also available in the CLI: `python main.py --suggest`;
 - drag-and-drop a CSV (or load the bundled sample);
 - pick the **model** and **max steps** (handy for dodging the per-model daily quota);
 - ask a question and watch the **reasoning trace stream live** — the plan, each
@@ -238,6 +241,7 @@ pytest            # sandbox (real subprocess) + orchestrator (mocked LLM) + adap
 | 3 | Planning / multi-step decomposition + charts | ✅ implemented |
 | 4 | Web UI (custom FastAPI + Streamlit) · session memory · deploy | UI ✅; memory ✅; deploy planned |
 | 5 | Eval harness (verified ground truth, quota-aware, scorecard) | ✅ implemented |
+| + | Pluggable providers (Groq default · Gemini) · agent-suggested questions | ✅ implemented |
 
 See [plan.md](plan.md) for the full plan, interface contracts, and milestone
 acceptance criteria.

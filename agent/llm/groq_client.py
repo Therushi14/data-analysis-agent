@@ -209,13 +209,15 @@ class GroqClient:
         last_exc: Exception | None = None
         for temp in temperatures:
             try:
-                response = self._clients[self._idx].chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    tools=tool_defs,
-                    tool_choice="auto",
-                    temperature=temp,
-                )
+                kwargs: dict[str, Any] = {
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": temp,
+                }
+                if tool_defs:  # omit for plain text completions (e.g. suggestions)
+                    kwargs["tools"] = tool_defs
+                    kwargs["tool_choice"] = "auto"
+                response = self._clients[self._idx].chat.completions.create(**kwargs)
                 return parse_response(response)
             except GroqAPIError as e:
                 if _is_tool_use_failed(e):

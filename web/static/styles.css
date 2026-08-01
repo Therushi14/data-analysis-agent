@@ -198,6 +198,23 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
   border-radius: 16px; background: var(--accent-soft); color: var(--accent);
 }
 
+/* --- Suggested questions --- */
+.suggestions { display: flex; flex-direction: column; gap: 8px; }
+.suggest-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--faint); font-weight: 600;
+}
+.suggest-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 999px;
+  padding: 7px 14px; transition: background .15s, border-color .15s, color .15s;
+}
+.chip:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+.chip:disabled { opacity: .5; cursor: default; }
+.chip-loading { color: var(--faint); font-size: 13px; padding: 7px 2px; }
+
 /* --- Conversation (multi-turn) --- */
 .convo-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

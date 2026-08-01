@@ -33,6 +33,7 @@ from agent.llm.base import LLMRateLimitError
 from agent.llm.factory import build_llm_client, provider_models
 from agent.memory import SessionMemory
 from agent.orchestrator import Orchestrator, result_summary
+from agent.suggest import suggest_questions
 from agent.tools.sandbox import Sandbox
 from agent.types import AgentRun, Step
 from config import get_settings
@@ -288,6 +289,28 @@ def reset(req: ResetRequest) -> dict[str, Any]:
     if mem is not None:
         mem.clear()
     return {"ok": True, "memory_turns": 0}
+
+
+class SuggestRequest(BaseModel):
+    dataset_id: str
+    refresh: bool = False
+
+
+@app.post("/api/suggest")
+def suggest(req: SuggestRequest) -> dict[str, Any]:
+    """Agent-generated starter questions for a dataset (cached per session)."""
+    entry = _DATASETS.get(req.dataset_id)
+    if entry is None:
+        raise HTTPException(404, "Dataset not found — load a CSV or the sample first.")
+    if not req.refresh and entry.get("suggestions") is not None:
+        return {"questions": entry["suggestions"]}
+
+    settings = get_settings()
+    if not settings.llm_keys:
+        return {"questions": []}
+    questions = suggest_questions(entry["df"], build_llm_client(settings), n=4)
+    entry["suggestions"] = questions
+    return {"questions": questions}
 
 
 # Static assets (css/js). Mounted last so it can't shadow the API routes above.
