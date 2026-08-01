@@ -100,12 +100,10 @@ def main() -> None:
     )
 
     settings = get_settings()
-    model = args.model or settings.gemini_model
+    model = args.model or settings.active_model
 
-    # Imported here so the CLI errors clearly if google-genai is missing.
-    from google.genai import errors as genai_errors
-
-    from agent.llm.gemini import GeminiClient
+    from agent.llm.base import LLMError, LLMRateLimitError
+    from agent.llm.factory import build_llm_client
 
     df = pd.read_csv(args.data)
 
@@ -115,12 +113,7 @@ def main() -> None:
         timeout_s=settings.sandbox_timeout_s,
         stdout_char_cap=settings.stdout_char_cap,
     )
-    llm = GeminiClient(
-        api_keys=settings.api_keys,
-        model=model,
-        temperature=settings.temperature,
-        request_timeout_s=settings.request_timeout_s,
-    )
+    llm = build_llm_client(settings, model=model)
     orchestrator = Orchestrator(
         llm=llm,
         sandbox=sandbox,
@@ -129,23 +122,24 @@ def main() -> None:
     )
 
     print(
-        f"(model: {model} | keys: {len(settings.api_keys)} | "
-        f"max_steps: {settings.max_steps} | timeout: {settings.request_timeout_s}s)"
+        f"(provider: {settings.llm_provider} | model: {model} | "
+        f"keys: {len(settings.llm_keys)} | max_steps: {settings.max_steps} | "
+        f"timeout: {settings.request_timeout_s}s)"
     )
 
     def answer(question: str, memory: SessionMemory | None = None) -> AgentRun | None:
         print_header(question)
         try:
             run = orchestrator.run(question, df, on_step=print_step, memory=memory)
-        except genai_errors.APIError as e:
-            msg = str(e)
-            print(f"\n[Gemini API error] {msg[:300]}")
-            if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
-                print(
-                    "\n>> All configured keys hit the free-tier limit, not a hang. "
-                    "Wait for the daily reset, add another GEMINI_API_KEY_BACKUP, "
-                    "switch GEMINI_MODEL to a different flash model, or enable billing."
-                )
+        except LLMRateLimitError as e:
+            print(f"\n[rate limit] {str(e)[:300]}")
+            print(
+                "\n>> All configured keys hit their rate limit. Wait a moment, add "
+                "another key to GROQ_API_KEY (comma-separated), or switch the model."
+            )
+            return None
+        except LLMError as e:
+            print(f"\n[LLM error] {str(e)[:300]}")
             return None
         print_footer(run)
         return run

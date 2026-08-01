@@ -182,7 +182,9 @@ def _df():
 
 class _StubSettings:
     def __init__(self, keys=("k1",)):
-        self.api_keys = list(keys)
+        self._keys = list(keys)
+        self.llm_provider = "groq"
+        self.groq_model = "llama-3.3-70b-versatile"
         self.gemini_model = "gemini-3.6-flash"
         self.max_steps = 8
         self.temperature = 0.1
@@ -190,3 +192,15 @@ class _StubSettings:
         self.max_consecutive_failures = 3
         self.sandbox_timeout_s = 15
         self.stdout_char_cap = 8000
+
+    @property
+    def llm_keys(self):
+        return self._keys
+
+    @property
+    def api_keys(self):
+        return self._keys
+
+    @property
+    def active_model(self):
+        return self.groq_model

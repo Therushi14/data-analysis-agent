@@ -42,15 +42,14 @@ def _is_rate_limit(msg: str) -> bool:
 
 def _default_agent_fn(model: str, settings):
     """A callable(question) -> record backed by the real agent. None if no keys."""
-    keys = settings.api_keys
-    if not keys:
+    if not settings.llm_keys:
         return None
 
     import time as _time
 
     import pandas as pd
 
-    from agent.llm.gemini import GeminiClient
+    from agent.llm.factory import build_llm_client
     from agent.orchestrator import Orchestrator
     from agent.tools.sandbox import Sandbox
 
@@ -61,12 +60,7 @@ def _default_agent_fn(model: str, settings):
         timeout_s=settings.sandbox_timeout_s,
         stdout_char_cap=settings.stdout_char_cap,
     )
-    llm = GeminiClient(
-        api_keys=keys,
-        model=model,
-        temperature=settings.temperature,
-        request_timeout_s=settings.request_timeout_s,
-    )
+    llm = build_llm_client(settings, model=model)
     orch = Orchestrator(
         llm=llm,
         sandbox=sandbox,
@@ -157,7 +151,7 @@ def run(
     verbose: bool = True,
 ) -> dict:
     settings = get_settings()
-    model = model or settings.gemini_model
+    model = model or settings.active_model
     cache = Cache(tag=tag, model=model, root=cache_root)
     stopped = None
 

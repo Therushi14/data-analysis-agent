@@ -6,8 +6,10 @@ and returning a grounded answer** with the table or chart it produced.
 
 The thing that makes this an *agent* (not a single LLM call) is the loop:
 **reason → write code → run → observe → self-correct → repeat**, capped by a
-max-iteration guard. The LLM is **Google Gemini** (via `google-genai`), behind a
-provider-agnostic interface so it can be swapped.
+max-iteration guard. The LLM sits behind a **provider-agnostic interface**: the
+default is **Groq** (`llama-3.3-70b-versatile`, via the `groq` SDK) for its fast
+inference and generous free-tier limits; set `LLM_PROVIDER=gemini` to switch to
+**Google Gemini** — no other code changes.
 
 > Status: **Levels 1–5 + a custom web UI** implemented — the reason → act →
 > observe → self-correct loop runs end to end, with up-front **planning** for
@@ -20,7 +22,7 @@ provider-agnostic interface so it can be swapped.
 
 ## Why the code runs in *our* sandbox
 
-Gemini ships a server-side `code_execution` tool that runs Python on Google's
+Some providers ship a server-side code-execution tool that runs Python on their
 machines. We deliberately **do not** use it. The self-correcting loop and the
 "how do you stop it running dangerous code" guardrails are the point of this
 project, and both require code running in a sandbox **we** control. So the model
@@ -32,14 +34,15 @@ calls a `run_python` **function**; we execute it out of process (see §Safety).
 Question + CSV
       │
       ▼
-Orchestrator (hand-rolled loop)  ◄──► LLMClient ──► Gemini adapter
+Orchestrator (hand-rolled loop)  ◄──► LLMClient ──► Groq / Gemini adapter
       │        ▲                          (function calling: plan / run_python / final_answer)
       ▼        │ observation
    Sandbox (subprocess) ── worker.py execs code, captures result/traceback/figure
 ```
 
 - `agent/orchestrator.py` — the loop controller (the piece we hand-roll).
-- `agent/llm/` — `base.py` (provider-agnostic `LLMClient`) + `gemini.py` (adapter).
+- `agent/llm/` — `base.py` (provider-agnostic `LLMClient`), `groq_client.py` and
+  `gemini.py` (adapters), `factory.py` (picks the provider from `LLM_PROVIDER`).
 - `agent/tools/` — `sandbox.py` (host: spawn + timeout + parse) and `worker.py`
   (runs inside the subprocess).
 - `agent/types.py` — the contracts (`ExecutionResult`, `Step`, `AgentRun`).
@@ -52,7 +55,7 @@ Orchestrator (hand-rolled loop)  ◄──► LLMClient ──► Gemini adapter
 pip install -r requirements.txt
 
 # 2. Configure your key
-cp .env.example .env         # then set GEMINI_API_KEY=...
+cp .env.example .env         # then set GROQ_API_KEY=... (get one at console.groq.com)
 
 # 3. Ask a question about the bundled sample dataset
 python main.py -q "Which region grew fastest from January to April by revenue?"
@@ -64,18 +67,21 @@ python main.py -d path/to/data.csv -q "What is the total revenue?"
 The CLI prints the full reasoning trace (each step's code + observation), then
 the final answer. Add `--verbose` for step logging.
 
-**Model note.** The default is `gemini-3.6-flash` — the latest Flash, which works
-on a free-tier key. Gemini **Pro** models require paid quota (they 429 on free
-tier), and older `gemini-2.5-*` IDs may 404 for new keys. The adapter handles
-Gemini 3.x thought-signatures, so 3.x models work out of the box. Change the
-model via `GEMINI_MODEL` in `.env`.
+**Providers.** Set `LLM_PROVIDER` in `.env`:
 
-**Free-tier quota.** The free tier allows ~**20 requests/day _per model_** (and a
-low per-minute rate). Each question costs a few requests, so you get roughly
-5–8 questions/day on one model. If you hit `RESOURCE_EXHAUSTED (429)`: wait for
-the daily reset, switch `GEMINI_MODEL` to a different flash model (each model has
-its own daily quota), use a key from a different project, or enable billing. The
-CLI caps each request at 60s and shows a clear message instead of hanging.
+- **`groq` (default)** — `llama-3.3-70b-versatile` via the `groq` SDK. Fast
+  inference and much more generous free-tier request limits than Gemini's flash
+  tier, which is why it's the default. `GROQ_API_KEY` may be a **comma-separated
+  list** for automatic failover. The adapter retries Groq's occasional
+  `tool_use_failed` (a Llama tool-formatting hiccup) transparently. Change the
+  model via `GROQ_MODEL`.
+- **`gemini`** — `gemini-3.6-flash` (the latest Flash) via `google-genai`. Pro
+  models need paid quota; older `gemini-2.5-*` IDs may 404 for new keys. The
+  adapter handles Gemini 3.x thought-signatures. Change the model via `GEMINI_MODEL`.
+
+Both go through the same `LLMClient` interface, so switching is a one-line `.env`
+change. If all keys hit their rate limit, the CLI/UI show a clear message (each
+request is capped at 60s) instead of hanging.
 
 ## Web app (primary UI)
 

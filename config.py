@@ -18,21 +18,56 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Secrets. A backup key (typically a different project) is used automatically
-    # when the primary hits its quota — free-tier limits are per-project-per-model.
+    # Which LLM provider to use: "groq" (default) or "gemini".
+    llm_provider: str = "groq"
+
+    # --- Groq (default). Generous free-tier request limits. A key value may be a
+    # comma-separated list for automatic failover; a backup key is also honored.
+    groq_api_key: str | None = None
+    groq_api_key_backup: str | None = None
+    groq_model: str = "llama-3.3-70b-versatile"
+
+    # --- Gemini (alternative). A backup key (typically a different project) is
+    # used automatically when the primary hits its quota (per-project-per-model).
     gemini_api_key: str | None = None
     gemini_api_key_backup: str | None = None
+    gemini_model: str = "gemini-3.6-flash"
+
+    temperature: float = 0.1
+    request_timeout_s: int = 60  # hard per-request cap so a call can't hang forever
+
+    @staticmethod
+    def _split(*values: str | None) -> list[str]:
+        """Flatten comma-separated key strings into a de-duplicated ordered list."""
+        out: list[str] = []
+        for value in values:
+            if not value:
+                continue
+            for part in value.split(","):
+                part = part.strip()
+                if part and part not in out:
+                    out.append(part)
+        return out
 
     @property
     def api_keys(self) -> list[str]:
-        """Keys in priority order (primary first), empties dropped."""
-        return [k for k in (self.gemini_api_key, self.gemini_api_key_backup) if k]
+        """Gemini keys in priority order (primary first), empties dropped."""
+        return self._split(self.gemini_api_key, self.gemini_api_key_backup)
 
-    # LLM. Default to the latest Flash: Pro tiers require paid quota, and older
-    # 2.5 models 404 for newly-created keys. Override GEMINI_MODEL in .env.
-    gemini_model: str = "gemini-3.6-flash"
-    temperature: float = 0.1
-    request_timeout_s: int = 60  # hard per-request cap so a call can't hang forever
+    @property
+    def groq_keys(self) -> list[str]:
+        """Groq keys in priority order (comma-separated values are expanded)."""
+        return self._split(self.groq_api_key, self.groq_api_key_backup)
+
+    @property
+    def llm_keys(self) -> list[str]:
+        """Keys for the active provider."""
+        return self.groq_keys if self.llm_provider == "groq" else self.api_keys
+
+    @property
+    def active_model(self) -> str:
+        """Default model for the active provider."""
+        return self.groq_model if self.llm_provider == "groq" else self.gemini_model
 
     # Agent loop. 8 gives a planned, multi-part question room to finish (one step
     # for the plan, plus a few compute/visualize steps) — within the 5-8 the

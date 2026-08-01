@@ -4,7 +4,7 @@
 
 Upload a CSV (or use the bundled sample), ask a question in plain English, and
 watch the agent write Python, run it in the sandbox, and answer with any table
-or chart it produced. Reuses the same Orchestrator/Sandbox/GeminiClient as the
+or chart it produced. Reuses the same Orchestrator/Sandbox/LLM client as the
 CLI, so behavior can't diverge.
 """
 
@@ -16,6 +16,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from agent.llm.base import LLMError, LLMRateLimitError
+from agent.llm.factory import build_llm_client, provider_models
 from agent.memory import SessionMemory
 from agent.orchestrator import Orchestrator, result_summary
 from agent.tools.sandbox import Sandbox
@@ -24,22 +26,11 @@ from config import get_settings
 
 DEFAULT_DATA = Path(__file__).parent / "data" / "sample_sales.csv"
 
-# Flash models are free-tier accessible. Quota is per-model, so switching models
-# is a quick way to get fresh daily budget. (Pro models need paid quota.)
-MODEL_OPTIONS = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-2.0-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-flash-latest",
-]
-
 st.set_page_config(page_title="Data-Analysis Agent", page_icon="📊", layout="wide")
 
 
 def resolve_keys(settings) -> list[str]:
-    """Keys in priority order, from Streamlit secrets (deploy) or .env (local)."""
+    """Keys for the active provider, from Streamlit secrets (deploy) or .env (local)."""
 
     def from_secrets(name: str):
         try:
@@ -47,9 +38,17 @@ def resolve_keys(settings) -> list[str]:
         except Exception:
             return None
 
-    primary = from_secrets("GEMINI_API_KEY") or settings.gemini_api_key
-    backup = from_secrets("GEMINI_API_KEY_BACKUP") or settings.gemini_api_key_backup
-    return [k for k in (primary, backup) if k]
+    if settings.llm_provider == "groq":
+        names = ("GROQ_API_KEY", "GROQ_API_KEY_BACKUP")
+    else:
+        names = ("GEMINI_API_KEY", "GEMINI_API_KEY_BACKUP")
+
+    keys: list[str] = []
+    for name in names:
+        value = from_secrets(name) or getattr(settings, name.lower(), None)
+        if value:
+            keys.extend(k.strip() for k in value.split(",") if k.strip())
+    return keys
 
 
 def render_step(step: Step) -> None:
@@ -105,13 +104,14 @@ def main() -> None:
     with st.sidebar:
         st.header("⚙️ Settings")
 
-        default_model = settings.gemini_model
-        model_options = [default_model] + [m for m in MODEL_OPTIONS if m != default_model]
+        default_model = settings.active_model
+        options = provider_models(settings.llm_provider)
+        model_options = [default_model] + [m for m in options if m != default_model]
         model = st.selectbox(
             "Model",
             model_options,
             index=0,
-            help="Free tier ≈ 20 requests/day per model. Switch models for fresh quota.",
+            help=f"Provider: {settings.llm_provider}. Switch models for different speed/quality.",
         )
         max_steps = st.slider("Max steps", 1, 12, settings.max_steps)
 
@@ -122,10 +122,12 @@ def main() -> None:
 
         if keys:
             st.success(
-                f"{len(keys)} API key(s) loaded" + (" · failover on" if len(keys) > 1 else "")
+                f"{settings.llm_provider}: {len(keys)} API key(s) loaded"
+                + (" · failover on" if len(keys) > 1 else "")
             )
         else:
-            st.error("No GEMINI_API_KEY found. Add it to `.env` or Streamlit secrets.")
+            provider_key = "GROQ_API_KEY" if settings.llm_provider == "groq" else "GEMINI_API_KEY"
+            st.error(f"No {provider_key} found. Add it to `.env` or Streamlit secrets.")
 
         st.divider()
         st.subheader("Dataset")
@@ -183,22 +185,13 @@ def main() -> None:
     if not (ask and question.strip()):
         return
 
-    from google.genai import errors as genai_errors  # noqa: PLC0415
-
-    from agent.llm.gemini import GeminiClient  # noqa: PLC0415
-
     work_dir = Path("artifacts") / "ui" / f"run-{int(time.time())}"
     sandbox = Sandbox(
         work_dir=work_dir,
         timeout_s=settings.sandbox_timeout_s,
         stdout_char_cap=settings.stdout_char_cap,
     )
-    llm = GeminiClient(
-        api_keys=keys,
-        model=model,
-        temperature=settings.temperature,
-        request_timeout_s=settings.request_timeout_s,
-    )
+    llm = build_llm_client(settings, model=model, api_keys=keys)
     orchestrator = Orchestrator(
         llm=llm,
         sandbox=sandbox,
@@ -216,16 +209,14 @@ def main() -> None:
     with st.spinner(f"Running on {model} …"):
         try:
             run = orchestrator.run(question.strip(), df, on_step=on_step, memory=memory)
-        except genai_errors.APIError as e:
-            msg = str(e)
-            if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
-                st.error(
-                    "All configured keys hit the free-tier limit. Wait for the daily "
-                    "reset, switch the model in the sidebar, add a backup key, or "
-                    "enable billing."
-                )
-            else:
-                st.error(f"Gemini API error: {msg[:400]}")
+        except LLMRateLimitError:
+            st.error(
+                "All configured keys hit their rate limit. Wait a moment, add another "
+                "key (comma-separated), or switch the model in the sidebar."
+            )
+            return
+        except LLMError as e:
+            st.error(f"LLM error: {str(e)[:400]}")
             return
 
     st.subheader("💬 Answer")

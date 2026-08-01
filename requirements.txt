@@ -1,5 +1,6 @@
 # --- Runtime ---
-google-genai>=1.0.0        # Gemini API SDK (from google import genai)
+groq>=0.11                 # Groq API SDK (default provider; llama-3.3-70b-versatile)
+google-genai>=1.0.0        # Gemini API SDK (alternative provider)
 pandas>=2.0
 numpy>=1.24
 matplotlib>=3.7

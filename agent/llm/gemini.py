@@ -20,7 +20,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-from agent.llm.base import LLMResponse, LLMToolCall
+from agent.llm.base import LLMRateLimitError, LLMResponse, LLMToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -205,13 +205,16 @@ class GeminiClient:
                 )
                 return parse_response(response)
             except Exception as e:  # noqa: BLE001 - re-raised unless it's a rate limit
-                if _is_rate_limit(e) and attempt < n - 1:
-                    nxt = (self._idx + 1) % n
-                    logger.warning(
-                        "API key #%d hit its quota; failing over to key #%d",
-                        self._idx + 1, nxt + 1,
-                    )
-                    self._idx = nxt
-                    continue
+                if _is_rate_limit(e):
+                    if attempt < n - 1:
+                        nxt = (self._idx + 1) % n
+                        logger.warning(
+                            "API key #%d hit its quota; failing over to key #%d",
+                            self._idx + 1, nxt + 1,
+                        )
+                        self._idx = nxt
+                        continue
+                    # All keys exhausted — surface a neutral, provider-agnostic error.
+                    raise LLMRateLimitError(str(e)) from e
                 raise
         raise RuntimeError("unreachable")  # loop always returns or raises

@@ -1,7 +1,7 @@
 """FastAPI web app for the Data-Analysis Agent — the primary UI.
 
 A hand-built frontend (served from ``web/static``) that reuses the exact same
-Orchestrator / Sandbox / GeminiClient as the CLI, so behaviour can't diverge.
+Orchestrator / Sandbox / LLM client as the CLI, so behaviour can't diverge.
 While the agent works, its reasoning trace streams to the browser as
 newline-delimited JSON (one event per step); charts are embedded inline as
 base64 data URIs so no artifact paths are exposed.
@@ -29,6 +29,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from agent.llm.base import LLMRateLimitError
+from agent.llm.factory import build_llm_client, provider_models
 from agent.memory import SessionMemory
 from agent.orchestrator import Orchestrator, result_summary
 from agent.tools.sandbox import Sandbox
@@ -38,17 +40,6 @@ from config import get_settings
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 DEFAULT_DATA = BASE_DIR.parent / "data" / "sample_sales.csv"
-
-# Flash models are free-tier accessible; quota is per-model, so switching models
-# is a quick way to get fresh daily budget. (Pro models need paid quota.)
-MODEL_OPTIONS = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-2.0-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-flash-latest",
-]
 
 app = FastAPI(title="Data-Analysis Agent")
 
@@ -138,17 +129,10 @@ def serialize_run(run: AgentRun) -> dict[str, Any]:
 
 # --- The agent run, streamed ----------------------------------------------------
 
-def _make_orchestrator(model: str, max_steps: int, keys: list[str], sandbox: Sandbox):
-    """Build a real Gemini-backed orchestrator. Isolated so tests can patch it."""
-    from agent.llm.gemini import GeminiClient  # noqa: PLC0415 (defer heavy import)
-
+def _make_orchestrator(model: str, max_steps: int, sandbox: Sandbox):
+    """Build a real orchestrator for the configured provider. Patched in tests."""
     settings = get_settings()
-    llm = GeminiClient(
-        api_keys=keys,
-        model=model,
-        temperature=settings.temperature,
-        request_timeout_s=settings.request_timeout_s,
-    )
+    llm = build_llm_client(settings, model=model)
     return Orchestrator(
         llm=llm,
         sandbox=sandbox,
@@ -158,7 +142,7 @@ def _make_orchestrator(model: str, max_steps: int, keys: list[str], sandbox: San
 
 
 def _is_rate_limit(msg: str) -> bool:
-    return "RESOURCE_EXHAUSTED" in msg or "429" in msg
+    return "RESOURCE_EXHAUSTED" in msg or "429" in msg or "rate limit" in msg.lower()
 
 
 def stream_answer(
@@ -166,7 +150,6 @@ def stream_answer(
     df: pd.DataFrame,
     model: str,
     max_steps: int,
-    keys: list[str],
     memory: SessionMemory | None = None,
 ):
     """Yield NDJSON events for a single agent run, streaming steps as they happen.
@@ -191,7 +174,7 @@ def stream_answer(
 
     def worker() -> None:
         try:
-            orch = _make_orchestrator(model, max_steps, keys, sandbox)
+            orch = _make_orchestrator(model, max_steps, sandbox)
             run = orch.run(question, df, on_step=on_step, memory=memory)
             if memory is not None and run.final_answer:
                 memory.add(question, run.final_answer, result_summary(run))
@@ -200,9 +183,10 @@ def stream_answer(
             events.put(("done", payload))
         except Exception as e:  # noqa: BLE001 — surface any failure to the client
             msg = str(e)
+            rate = isinstance(e, LLMRateLimitError) or _is_rate_limit(msg)
             events.put((
                 "error",
-                {"message": msg[:500] or type(e).__name__, "rate_limited": _is_rate_limit(msg)},
+                {"message": msg[:500] or type(e).__name__, "rate_limited": rate},
             ))
         finally:
             events.put((None, None))
@@ -226,10 +210,11 @@ def index() -> FileResponse:
 @app.get("/api/config")
 def config() -> dict[str, Any]:
     settings = get_settings()
-    keys = settings.api_keys
-    default = settings.gemini_model
-    models = [default] + [m for m in MODEL_OPTIONS if m != default]
+    keys = settings.llm_keys
+    default = settings.active_model
+    models = [default] + [m for m in provider_models(settings.llm_provider) if m != default]
     return {
+        "provider": settings.llm_provider,
         "models": models,
         "default_model": default,
         "max_steps": settings.max_steps,
@@ -278,14 +263,14 @@ def ask(req: AskRequest) -> StreamingResponse:
         raise HTTPException(400, "The question is empty.")
 
     settings = get_settings()
-    keys = settings.api_keys
-    if not keys:
-        raise HTTPException(400, "No GEMINI_API_KEY configured. Add it to your .env.")
+    if not settings.llm_keys:
+        provider_key = "GROQ_API_KEY" if settings.llm_provider == "groq" else "GEMINI_API_KEY"
+        raise HTTPException(400, f"No {provider_key} configured. Add it to your .env.")
 
-    model = req.model or settings.gemini_model
+    model = req.model or settings.active_model
     max_steps = max(1, min(int(req.max_steps or settings.max_steps), 12))
 
-    gen = stream_answer(question, entry["df"], model, max_steps, keys, entry.get("memory"))
+    gen = stream_answer(question, entry["df"], model, max_steps, entry.get("memory"))
     return StreamingResponse(gen, media_type="application/x-ndjson")
 
 

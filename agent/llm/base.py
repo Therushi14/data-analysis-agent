@@ -18,6 +18,14 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 
+class LLMError(RuntimeError):
+    """A provider LLM call failed. Adapters raise this so callers stay vendor-neutral."""
+
+
+class LLMRateLimitError(LLMError):
+    """The provider hit a quota / rate limit (e.g. HTTP 429). Handled specially by the UI."""
+
+
 @dataclass
 class LLMToolCall:
     name: str  # "run_python" | "final_answer"
